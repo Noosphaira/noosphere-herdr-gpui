@@ -56,6 +56,11 @@ impl Host {
         }
     }
 
+    /// Whether scripts run over SSH rather than on this machine.
+    pub(crate) fn is_remote(&self) -> bool {
+        self.ssh.is_some()
+    }
+
     /// The Herdr session this host's `herdr` CLI addresses, when not the default.
     pub(crate) fn session(&self) -> Option<&str> {
         self.session.as_deref()

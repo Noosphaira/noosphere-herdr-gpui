@@ -5,6 +5,7 @@ use super::{
     job::{self, Launched, Request},
 };
 
+mod button;
 mod form;
 
 fn request() -> Request {

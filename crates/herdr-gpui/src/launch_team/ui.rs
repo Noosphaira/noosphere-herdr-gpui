@@ -12,6 +12,9 @@ use crate::{
 };
 use gpui::{prelude::*, *};
 
+/// The narrowest window whose title bar spells out the Launch team button.
+const LABELLED_WIDTH: f32 = 1000.;
+
 impl HerdrWindow {
     pub(crate) fn poll_launch_team(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let open = self.menu.page == Some(Page::LaunchTeam);
@@ -94,6 +97,75 @@ impl HerdrWindow {
             .position(|focus| focus.is_focused(window))
             .map_or(1, |index| (index + 1) % fields.len());
         window.focus(&fields[next], cx);
+    }
+
+    /// The title bar's button: Launch team is always one click away. A narrow
+    /// window keeps only the icon, so tabs and status keep their room.
+    pub(crate) fn render_launch_team_button(
+        &self,
+        window_width: Pixels,
+        cx: &mut Context<Self>,
+    ) -> Stateful<Div> {
+        let theme = &self.theme;
+        div()
+            .id("titlebar-launch-team")
+            .debug_selector(|| "titlebar-launch-team".into())
+            .flex()
+            .flex_none()
+            .items_center()
+            .gap(px(6.))
+            .h(px(24.))
+            .px(px(8.))
+            .mr(px(4.))
+            .rounded(px(crate::config::corners::CONTROL))
+            .cursor_pointer()
+            .hover(|button| button.bg(rgb(theme.active)))
+            .child(
+                svg()
+                    .path("icons/agent-opencode.svg")
+                    .size(px(14.))
+                    .flex_none()
+                    .text_color(rgb(theme.foreground)),
+            )
+            .when(window_width >= px(LABELLED_WIDTH), |button| {
+                button.child(div().text_color(rgb(theme.foreground)).child("Launch team"))
+            })
+            .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
+            .on_click(cx.listener(|this, _, window, cx| {
+                cx.stop_propagation();
+                this.open_launch_team_for_focused(window, cx);
+            }))
+    }
+
+    /// Fill the path field from the desktop's folder picker. Only offered
+    /// for this machine: the picker browses local folders.
+    fn browse_launch_team_repo(&mut self, cx: &mut Context<Self>) {
+        let picked = cx.prompt_for_paths(PathPromptOptions {
+            files: false,
+            directories: true,
+            multiple: false,
+            prompt: Some("Choose repository".into()),
+        });
+        cx.spawn(async move |this, cx| {
+            let Ok(Ok(Some(paths))) = picked.await else {
+                return;
+            };
+            let Some(path) = paths.into_iter().next() else {
+                return;
+            };
+            let _ = this.update(cx, |this, cx| {
+                if let Some(launch) = &this.launch_team
+                    && !launch.launching()
+                {
+                    let text = path.to_string_lossy().into_owned();
+                    launch
+                        .path
+                        .update(cx, |input, cx| input.set_text_selected(&text, cx));
+                    cx.notify();
+                }
+            });
+        })
+        .detach();
     }
 
     fn submit_launch_team(&mut self, cx: &mut Context<Self>) {
@@ -187,8 +259,26 @@ impl HerdrWindow {
             })
             .child(
                 div()
-                    .debug_selector(|| "launch-team-path".into())
-                    .child(launch.path.clone()),
+                    .flex()
+                    .items_center()
+                    .gap(px(6.))
+                    .child(
+                        div()
+                            .flex_1()
+                            .min_w_0()
+                            .debug_selector(|| "launch-team-path".into())
+                            .child(launch.path.clone()),
+                    )
+                    .when(!launch.origin.host.is_remote(), |field| {
+                        field.child(
+                            chip("launch-team-browse", 0, "Browse...".into(), false).on_click(
+                                cx.listener(|this, _, _, cx| {
+                                    cx.stop_propagation();
+                                    this.browse_launch_team_repo(cx);
+                                }),
+                            ),
+                        )
+                    }),
             )
             .into_any_element();
 
