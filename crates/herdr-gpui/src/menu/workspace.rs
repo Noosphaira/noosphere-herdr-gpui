@@ -244,7 +244,9 @@ impl NewWorktreeUnavailable {
 
 /// The workspace focused when the new worktree shortcut is pressed, once it
 /// is known to have a source for one.
-fn new_worktree_source(snapshot: &ClientShellSnapshot) -> Result<String, NewWorktreeUnavailable> {
+pub(super) fn new_worktree_source(
+    snapshot: &ClientShellSnapshot,
+) -> Result<String, NewWorktreeUnavailable> {
     let focused = snapshot
         .workspaces
         .iter()
@@ -473,6 +475,9 @@ impl HerdrWindow {
         if let Some(label) = self.fan_out_item() {
             items.push((WorkspaceMenuAction::FanOut, label));
         }
+        if let Some(label) = self.launch_team_item() {
+            items.push((WorkspaceMenuAction::LaunchTeam, label));
+        }
         items.push((Dialog(WorkspaceAction::Rename), "Rename"));
         if self.teleport_mark().is_some() {
             items.push((WorkspaceMenuAction::GoToTeleported, "Go to teleported copy"));
@@ -693,6 +698,7 @@ impl HerdrWindow {
             WorkspaceMenuAction::ClearTeleported => self.clear_teleport_mark(window, cx),
             WorkspaceMenuAction::Checkpoints => self.open_checkpoints(window, cx),
             WorkspaceMenuAction::FanOut => self.open_fan_out(window, cx),
+            WorkspaceMenuAction::LaunchTeam => self.open_launch_team(window, cx),
             WorkspaceMenuAction::Script(kind) => self.run_workspace_script(kind, window, cx),
         }
     }

@@ -1111,6 +1111,21 @@ scripts, so a team shares them and they follow the branch, as Conductor's
 `.conductor/settings.toml` and Superset's `.superset/config.json` do. Only
 the trust decision is local.
 
+## Launch Team
+
+**Launch team...** in a Git workspace's right-click menu, or **Launch Team**
+in the command palette (`cmd-shift-l`, Super+Shift+L on Linux) for the
+focused workspace, starts one sandboxed OpenCode agent per role of a team on
+a new worktree, and gives each the same task. Pick a team, name the branch,
+describe the task, and press Enter; the dialog follows the new workspace when
+it is ready, or shows the failing step and its output and stays open.
+
+The work is done by `herdr-launch` on the workspace's host, so it must be
+installed there; see [`contrib/local-agents`](../../contrib/local-agents/README.md)
+for setup, team files, folder grants, and the sandbox. Like Fan out, it runs
+as a host script, locally or over SSH, on Linux and macOS clients. Closing the
+dialog does not stop a launch that has started. The task is a single line.
+
 ## Teleport
 
 Right-click a linked worktree and choose Teleport... to move it to another

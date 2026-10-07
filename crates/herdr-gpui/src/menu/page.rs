@@ -61,6 +61,8 @@ pub(crate) enum Page {
     Checkpoints,
     /// One prompt sent to several agents, and their comparison.
     FanOut,
+    /// A team of sandboxed agents started on a new worktree.
+    LaunchTeam,
     /// Asks whether to trust a repository's worktree script before it runs.
     WorktreeScript,
 }
@@ -97,6 +99,8 @@ pub(crate) enum WorkspaceMenuAction {
     Checkpoints,
     /// Send one prompt to several agents, or reopen their comparison.
     FanOut,
+    /// Start a team of sandboxed agents on a new worktree of this repository.
+    LaunchTeam,
     /// Run one of the repository's worktree scripts in a new tab.
     Script(crate::worktree_scripts::ScriptKind),
 }
@@ -121,6 +125,7 @@ impl WorkspaceMenuAction {
             Self::ClearTeleported => "icons/x.svg",
             Self::Checkpoints => "icons/refresh.svg",
             Self::FanOut => "icons/fan-out.svg",
+            Self::LaunchTeam => "icons/agent-opencode.svg",
             Self::Script(crate::worktree_scripts::ScriptKind::Setup) => "icons/refresh.svg",
             Self::Script(_) => "icons/play.svg",
             Self::PullRequest => return None,

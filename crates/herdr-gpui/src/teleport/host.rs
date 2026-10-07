@@ -56,6 +56,11 @@ impl Host {
         }
     }
 
+    /// The Herdr session this host's `herdr` CLI addresses, when not the default.
+    pub(crate) fn session(&self) -> Option<&str> {
+        self.session.as_deref()
+    }
+
     /// The prelude every script starts with: strict mode, a `PATH` that finds
     /// user-installed tools in a non-interactive SSH shell, and `herdr_cli`
     /// bound to this host's session.
