@@ -12,7 +12,7 @@ mod job;
 mod state;
 mod ui;
 
-pub(crate) use state::{LaunchTeam, Origin};
+pub(crate) use state::{Fields, LaunchTeam, Origin, Repo};
 
 #[cfg(test)]
 mod tests;

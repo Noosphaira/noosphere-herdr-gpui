@@ -244,9 +244,7 @@ impl NewWorktreeUnavailable {
 
 /// The workspace focused when the new worktree shortcut is pressed, once it
 /// is known to have a source for one.
-pub(super) fn new_worktree_source(
-    snapshot: &ClientShellSnapshot,
-) -> Result<String, NewWorktreeUnavailable> {
+fn new_worktree_source(snapshot: &ClientShellSnapshot) -> Result<String, NewWorktreeUnavailable> {
     let focused = snapshot
         .workspaces
         .iter()

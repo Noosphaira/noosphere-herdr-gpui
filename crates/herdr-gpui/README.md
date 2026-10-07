@@ -1113,12 +1113,16 @@ the trust decision is local.
 
 ## Launch Team
 
-**Launch team...** in a Git workspace's right-click menu, or **Launch Team**
-in the command palette (`cmd-shift-l`, Super+Shift+L on Linux) for the
-focused workspace, starts one sandboxed OpenCode agent per role of a team on
-a new worktree, and gives each the same task. Pick a team, name the branch,
-describe the task, and press Enter; the dialog follows the new workspace when
-it is ready, or shows the failing step and its output and stays open.
+**Launch Team** in the command palette (`cmd-shift-l`, Super+Shift+L on
+Linux), or **Launch team...** in a Git workspace's right-click menu, starts
+one sandboxed OpenCode agent per role of a team on a new worktree, and gives
+each the same task. Pick one of the repositories open on the host, or type
+the path of any other repository there (it need not be open in Herdr); the
+right-clicked or focused workspace's repository is picked for you, and a
+linked checkout's branch becomes the base. Then pick a team, name the branch,
+describe the task, and press Enter (Tab moves between the fields). The dialog
+follows the new workspace when it is ready, or shows the failing step and its
+output and stays open.
 
 The work is done by `herdr-launch` on the workspace's host, so it must be
 installed there; see [`contrib/local-agents`](../../contrib/local-agents/README.md)

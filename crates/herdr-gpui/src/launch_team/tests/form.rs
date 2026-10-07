@@ -1,7 +1,7 @@
 use super::*;
 use crate::{
     launch_team::{
-        LaunchTeam, Origin,
+        Fields, LaunchTeam, Origin, Repo,
         state::{NotReady, Stage},
     },
     search_input::SearchInput,
@@ -14,16 +14,21 @@ fn origin() -> Origin {
         endpoint_id: "local".into(),
         endpoint_label: "This Mac".into(),
         host: Host::new(&herdr_client::ConnectTarget::Local).unwrap(),
-        repo: "/nonexistent/repo/.git".into(),
-        repo_label: "app".into(),
-        base: None,
     }
 }
 
 fn launch_team(cx: &mut TestAppContext) -> LaunchTeam {
-    let branch = cx.new(SearchInput::new);
-    let task = cx.new(SearchInput::new);
-    let mut launch = LaunchTeam::start(origin(), branch, task);
+    let fields = Fields {
+        path: cx.new(SearchInput::new),
+        branch: cx.new(SearchInput::new),
+        task: cx.new(SearchInput::new),
+    };
+    let repos = vec![Repo {
+        key: "/nonexistent/app/.git".into(),
+        label: "app".into(),
+        base: Some("feature-a".into()),
+    }];
+    let mut launch = LaunchTeam::start(origin(), repos, Some(0), fields);
     launch.teams_for_test(vec!["app-team".into()]);
     launch
 }
@@ -33,16 +38,35 @@ fn the_form_names_what_it_still_needs(cx: &mut TestAppContext) {
     let mut launch = launch_team(cx);
     // A single team is picked for you.
     assert_eq!(launch.team(), Some("app-team"));
-    assert_eq!(launch.not_ready("", "x"), Some(NotReady::NoBranch));
+    assert_eq!(launch.not_ready("", "", "x"), Some(NotReady::NoBranch));
     assert_eq!(
-        launch.not_ready("bad..name", "x"),
+        launch.not_ready("", "bad..name", "x"),
         Some(NotReady::InvalidBranch)
     );
-    assert_eq!(launch.not_ready("feature-a", "  "), Some(NotReady::NoTask));
-    assert_eq!(launch.not_ready("feature-a", "do it"), None);
+    assert_eq!(
+        launch.not_ready("", "feature-a", "  "),
+        Some(NotReady::NoTask)
+    );
+    assert_eq!(launch.not_ready("", "feature-a", "do it"), None);
+    launch.repo = None;
+    assert_eq!(
+        launch.not_ready("", "feature-a", "do it"),
+        Some(NotReady::NoRepo)
+    );
+    // A typed path stands in for a picked repository, from its own HEAD.
+    assert_eq!(
+        launch.target(" ~/code/other "),
+        Some(("~/code/other", None))
+    );
+    assert_eq!(launch.not_ready("~/code/other", "feature-a", "do it"), None);
+    launch.repo = Some(0);
+    assert_eq!(
+        launch.target(""),
+        Some(("/nonexistent/app/.git", Some("feature-a")))
+    );
     launch.selected = None;
     assert_eq!(
-        launch.not_ready("feature-a", "do it"),
+        launch.not_ready("", "feature-a", "do it"),
         Some(NotReady::NoTeam)
     );
 }
@@ -52,7 +76,7 @@ fn a_failed_launch_returns_to_the_form_with_its_error(cx: &mut TestAppContext) {
     let mut launch = launch_team(cx);
     launch.stage = Stage::Launching;
     assert_eq!(
-        launch.not_ready("feature-a", "do it"),
+        launch.not_ready("", "feature-a", "do it"),
         Some(NotReady::Launching)
     );
     launch.finish_for_test(Err(Error::Failed {

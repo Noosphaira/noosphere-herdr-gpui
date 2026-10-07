@@ -23,10 +23,16 @@ pub(crate) struct Origin {
     pub(crate) endpoint_id: String,
     pub(crate) endpoint_label: String,
     pub(crate) host: Host,
-    /// The repository's Git common directory on that host.
-    pub(crate) repo: String,
-    pub(crate) repo_label: String,
-    /// The linked checkout's branch the new one starts from, if any.
+}
+
+/// A repository open on the host, offered as a launch target.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct Repo {
+    /// Its Git common directory on the host.
+    pub(crate) key: String,
+    pub(crate) label: String,
+    /// The branch a linked checkout's launch starts from, when the dialog
+    /// was opened from that checkout.
     pub(crate) base: Option<String>,
 }
 
@@ -47,6 +53,7 @@ pub(crate) enum Stage {
 /// Why the form cannot be submitted yet.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum NotReady {
+    NoRepo,
     NoTeam,
     NoBranch,
     InvalidBranch,
@@ -57,6 +64,7 @@ pub(crate) enum NotReady {
 impl NotReady {
     pub(crate) fn message(self) -> &'static str {
         match self {
+            Self::NoRepo => "Pick a repository or enter its path",
             Self::NoTeam => "Pick a team",
             Self::NoBranch => "Name the new branch",
             Self::InvalidBranch => "That is not a valid branch name",
@@ -74,6 +82,13 @@ pub(crate) enum Update {
     Launched(Launched),
 }
 
+/// The dialog's text fields.
+pub(crate) struct Fields {
+    pub(crate) path: Entity<SearchInput>,
+    pub(crate) branch: Entity<SearchInput>,
+    pub(crate) task: Entity<SearchInput>,
+}
+
 enum Event {
     Teams(Result<Vec<String>, Error>),
     Launched(Result<Launched, Error>),
@@ -84,6 +99,10 @@ pub(crate) struct LaunchTeam {
     pub(crate) stage: Stage,
     pub(crate) teams: Teams,
     pub(crate) selected: Option<usize>,
+    pub(crate) repos: Vec<Repo>,
+    pub(crate) repo: Option<usize>,
+    /// A repository path typed on the host; used instead of `repo` when set.
+    pub(crate) path: Entity<SearchInput>,
     pub(crate) branch: Entity<SearchInput>,
     pub(crate) task: Entity<SearchInput>,
     pub(crate) error: Option<Error>,
@@ -115,15 +134,20 @@ impl LaunchTeam {
     /// Opens on the form at once, listing the host's teams meanwhile.
     pub(crate) fn start(
         origin: Origin,
-        branch: Entity<SearchInput>,
-        task: Entity<SearchInput>,
+        repos: Vec<Repo>,
+        repo: Option<usize>,
+        fields: Fields,
     ) -> Self {
+        let Fields { path, branch, task } = fields;
         let (sender, events) = mpsc::channel();
         let launch = Self {
             origin,
             stage: Stage::Compose,
             teams: Teams::Loading,
             selected: None,
+            repos,
+            repo,
+            path,
             branch,
             task,
             error: None,
@@ -157,10 +181,24 @@ impl LaunchTeam {
         }
     }
 
+    /// The repository to launch into and its base: a typed path wins over
+    /// the picked repository, and starts from that checkout's `HEAD`.
+    pub(crate) fn target<'a>(&'a self, path: &'a str) -> Option<(&'a str, Option<&'a str>)> {
+        let path = path.trim();
+        if !path.is_empty() {
+            return Some((path, None));
+        }
+        let repo = self.repos.get(self.repo?)?;
+        Some((&repo.key, repo.base.as_deref()))
+    }
+
     /// The first reason the form cannot launch, given its field values.
-    pub(crate) fn not_ready(&self, branch: &str, task: &str) -> Option<NotReady> {
+    pub(crate) fn not_ready(&self, path: &str, branch: &str, task: &str) -> Option<NotReady> {
         if self.launching() {
             return Some(NotReady::Launching);
+        }
+        if self.target(path).is_none() {
+            return Some(NotReady::NoRepo);
         }
         if self.team().is_none() {
             return Some(NotReady::NoTeam);
@@ -178,19 +216,19 @@ impl LaunchTeam {
     }
 
     /// Start the launch when the form is ready. Returns whether it started.
-    pub(crate) fn launch(&mut self, branch: &str, task: &str) -> bool {
-        if self.not_ready(branch, task).is_some() {
+    pub(crate) fn launch(&mut self, path: &str, branch: &str, task: &str) -> bool {
+        if self.not_ready(path, branch, task).is_some() {
             return false;
         }
-        let Some(team) = self.team() else {
+        let (Some(team), Some((repo, base))) = (self.team(), self.target(path)) else {
             return false;
         };
         let request = Request {
             team: team.to_owned(),
-            repo: self.origin.repo.clone(),
+            repo: repo.to_owned(),
             branch: branch.trim().to_owned(),
             task: task.trim().to_owned(),
-            base: self.origin.base.clone(),
+            base: base.map(str::to_owned),
         };
         self.stage = Stage::Launching;
         self.error = None;

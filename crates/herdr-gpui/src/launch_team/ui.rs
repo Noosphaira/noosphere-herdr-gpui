@@ -66,12 +66,11 @@ impl HerdrWindow {
         let Some(launch) = &self.launch_team else {
             return;
         };
-        let (branch, task) = (launch.branch.read(cx), launch.task.read(cx));
+        let composing = [&launch.path, &launch.branch, &launch.task]
+            .iter()
+            .any(|field| field.read(cx).is_composing());
         // The fields edit themselves; only these keys belong to the dialog.
-        if branch.is_composing()
-            || task.is_composing()
-            || !matches!(event.keystroke.key.as_str(), "escape" | "enter" | "tab")
-        {
+        if composing || !matches!(event.keystroke.key.as_str(), "escape" | "enter" | "tab") {
             return;
         }
         cx.stop_propagation();
@@ -83,28 +82,28 @@ impl HerdrWindow {
         }
     }
 
-    /// Tab moves between the two text fields.
+    /// Tab moves through the text fields: path, branch, task, and around.
     fn cycle_launch_team_field(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let Some(launch) = &self.launch_team else {
             return;
         };
-        let branch = launch.branch.read(cx).focus.clone();
-        let task = launch.task.read(cx).focus.clone();
-        let next = if branch.is_focused(window) {
-            task
-        } else {
-            branch
-        };
-        window.focus(&next, cx);
+        let fields =
+            [&launch.path, &launch.branch, &launch.task].map(|field| field.read(cx).focus.clone());
+        let next = fields
+            .iter()
+            .position(|focus| focus.is_focused(window))
+            .map_or(1, |index| (index + 1) % fields.len());
+        window.focus(&fields[next], cx);
     }
 
     fn submit_launch_team(&mut self, cx: &mut Context<Self>) {
         let Some(launch) = &mut self.launch_team else {
             return;
         };
+        let path = launch.path.read(cx).text().to_owned();
         let branch = launch.branch.read(cx).text().to_owned();
         let task = launch.task.read(cx).text().to_owned();
-        if launch.launch(&branch, &task) {
+        if launch.launch(&path, &branch, &task) {
             cx.notify();
         }
     }
@@ -134,6 +133,65 @@ impl HerdrWindow {
                 .child(div().flex_1().min_w_0().child(field))
         };
 
+        let chip = |id: &'static str, index: usize, label: String, picked: bool| {
+            div()
+                .id((id, index))
+                .debug_selector(move || format!("{id}-{index}"))
+                .px(px(10.))
+                .py(px(3.))
+                .rounded(px(crate::config::corners::CONTROL))
+                .border_1()
+                .border_color(if picked {
+                    rgb(theme.foreground)
+                } else {
+                    rgb(theme.active)
+                })
+                .when(picked, |chip| chip.bg(rgb(theme.active)))
+                .cursor_pointer()
+                .hover(|chip| chip.bg(rgb(theme.active)))
+                .child(label)
+        };
+        let path_text = launch.path.read(cx).text().to_owned();
+        // A typed path replaces the picked repository, so the pick dims.
+        let typed = !path_text.trim().is_empty();
+        let repos = div()
+            .flex()
+            .flex_col()
+            .gap(px(6.))
+            .when(!launch.repos.is_empty(), |column| {
+                column.child(div().flex().flex_wrap().gap(px(6.)).children(
+                    launch.repos.iter().enumerate().map(|(index, repo)| {
+                        let label = match &repo.base {
+                            Some(base) => format!("{} (from {base})", repo.label),
+                            None => repo.label.clone(),
+                        };
+                        chip(
+                            "launch-team-repo",
+                            index,
+                            label,
+                            !typed && launch.repo == Some(index),
+                        )
+                        .when(typed, |chip| chip.opacity(0.5))
+                        .on_click(cx.listener(move |this, _, _, cx| {
+                            cx.stop_propagation();
+                            if let Some(launch) = &mut this.launch_team
+                                && !launch.launching()
+                            {
+                                launch.repo = Some(index);
+                                launch.path.update(cx, |path, cx| path.clear(cx));
+                                cx.notify();
+                            }
+                        }))
+                    }),
+                ))
+            })
+            .child(
+                div()
+                    .debug_selector(|| "launch-team-path".into())
+                    .child(launch.path.clone()),
+            )
+            .into_any_element();
+
         let teams: AnyElement = match &launch.teams {
             Teams::Loading => progress::bar(
                 "launch-team-progress",
@@ -156,46 +214,39 @@ impl HerdrWindow {
                 .flex_wrap()
                 .gap(px(6.))
                 .children(teams.iter().enumerate().map(|(index, team)| {
-                    let picked = launch.selected == Some(index);
-                    div()
-                        .id(("launch-team-team", index))
-                        .debug_selector(move || format!("launch-team-team-{index}"))
-                        .px(px(10.))
-                        .py(px(3.))
-                        .rounded(px(crate::config::corners::CONTROL))
-                        .border_1()
-                        .border_color(if picked {
-                            rgb(theme.foreground)
-                        } else {
-                            rgb(theme.active)
-                        })
-                        .when(picked, |chip| chip.bg(rgb(theme.active)))
-                        .cursor_pointer()
-                        .hover(|chip| chip.bg(rgb(theme.active)))
-                        .child(team.clone())
-                        .on_click(cx.listener(move |this, _, _, cx| {
-                            cx.stop_propagation();
-                            if let Some(launch) = &mut this.launch_team
-                                && !launch.launching()
-                            {
-                                launch.selected = Some(index);
-                                cx.notify();
-                            }
-                        }))
+                    chip(
+                        "launch-team-team",
+                        index,
+                        team.clone(),
+                        launch.selected == Some(index),
+                    )
+                    .on_click(cx.listener(move |this, _, _, cx| {
+                        cx.stop_propagation();
+                        if let Some(launch) = &mut this.launch_team
+                            && !launch.launching()
+                        {
+                            launch.selected = Some(index);
+                            cx.notify();
+                        }
+                    }))
                 }))
                 .into_any_element(),
         };
 
         let branch_text = launch.branch.read(cx).text().to_owned();
         let task_text = launch.task.read(cx).text().to_owned();
-        let not_ready = launch.not_ready(&branch_text, &task_text);
-        let base = launch.origin.base.as_deref().unwrap_or("HEAD");
+        let not_ready = launch.not_ready(&path_text, &branch_text, &task_text);
+        let base = launch
+            .target(&path_text)
+            .and_then(|(_, base)| base)
+            .unwrap_or("HEAD");
         let mut body = div()
             .flex()
             .flex_col()
             .gap(px(10.))
             .px(px(16.))
             .py(px(12.))
+            .child(row("Repo", repos))
             .child(row("Team", teams))
             .child(row(
                 "Branch",
@@ -296,10 +347,12 @@ impl HerdrWindow {
                                     .font_weight(FontWeight::SEMIBOLD)
                                     .child("Launch team"),
                             )
-                            .child(div().truncate().text_color(muted).child(format!(
-                                "{} on {}",
-                                launch.origin.repo_label, launch.origin.endpoint_label
-                            ))),
+                            .child(
+                                div()
+                                    .truncate()
+                                    .text_color(muted)
+                                    .child(format!("on {}", launch.origin.endpoint_label)),
+                            ),
                     ),
             )
             .child(
