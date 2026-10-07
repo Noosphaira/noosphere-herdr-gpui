@@ -2,6 +2,7 @@
 """Launch a team of sandboxed OpenCode agents on a new git worktree.
 
 Usage:
+  herdr-launch --list-teams
   herdr-launch --team <team> --repo <path> --branch <name> --task <text>
                [--base <ref>] [--session <name>] [--json]
 
@@ -28,7 +29,8 @@ TEAMS_DIR = herdr_grants.CONFIG_DIR / "teams"
 AGENTS_DIR = Path.home() / ".config/opencode/agents"
 SANDBOX = Path(__file__).resolve().parent / "herdr-sandbox"
 STEPS = 6
-AGENT_READY_TIMEOUT_MS = 60_000
+# Below the GUI's 60 s script idle limit; agents are ready in about a second.
+AGENT_READY_TIMEOUT_MS = 45_000
 
 
 class StepError(Exception):
@@ -88,13 +90,20 @@ class Launcher:
             raise StepError("validate", f"no OpenCode agent file for: {', '.join(missing)} in {AGENTS_DIR}")
         self.roles = roles
 
-        self.repo = Path(self.args.repo).expanduser().resolve()
-        top = self.git("rev-parse", "--show-toplevel", check=False)
-        if top.returncode != 0 or Path(top.stdout.strip()) != self.repo:
-            raise StepError("validate", f"{self.repo} is not the top of a git checkout")
-        common = self.git("rev-parse", "--path-format=absolute", "--git-common-dir").stdout.strip()
-        if Path(common) != self.repo / ".git":
-            raise StepError("validate", f"{self.repo} is a linked worktree; pick the repo's main checkout")
+        # Any path inside the repo works, including its .git directory (what
+        # the GUI knows) or a linked worktree: agents always branch from the
+        # main checkout's repository.
+        given = Path(self.args.repo).expanduser().resolve()
+        common = self.run(
+            ["git", "-C", str(given), "rev-parse", "--path-format=absolute", "--git-common-dir"],
+            check=False,
+        )
+        if common.returncode != 0:
+            raise StepError("validate", f"{given} is not inside a git repository")
+        common_dir = Path(common.stdout.strip())
+        if common_dir.name != ".git":
+            raise StepError("validate", f"unsupported repository layout: {common_dir}")
+        self.repo = common_dir.parent
 
         branch = self.args.branch
         if self.run(["git", "check-ref-format", "--branch", branch], check=False).returncode != 0:
@@ -182,14 +191,22 @@ class Launcher:
 
 def main():
     parser = argparse.ArgumentParser(prog="herdr-launch", description=__doc__.split("\n")[1])
-    parser.add_argument("--team", required=True)
-    parser.add_argument("--repo", required=True)
-    parser.add_argument("--branch", required=True)
-    parser.add_argument("--task", required=True)
+    parser.add_argument("--list-teams", action="store_true", help="print the team names as JSON and exit")
+    parser.add_argument("--team")
+    parser.add_argument("--repo")
+    parser.add_argument("--branch")
+    parser.add_argument("--task")
     parser.add_argument("--base", help="ref to branch from (default: herdr's default)")
     parser.add_argument("--session", help="herdr session name (default: the default session)")
     parser.add_argument("--json", action="store_true", help="print the result as JSON")
     args = parser.parse_args()
+    if args.list_teams:
+        teams = sorted(p.stem for p in TEAMS_DIR.glob("*.yaml")) if TEAMS_DIR.is_dir() else []
+        print(json.dumps({"teams": teams}))
+        return
+    missing = [f"--{n}" for n in ("team", "repo", "branch", "task") if getattr(args, n) is None]
+    if missing:
+        parser.error(f"missing {', '.join(missing)}")
 
     launcher = Launcher(args)
     try:
