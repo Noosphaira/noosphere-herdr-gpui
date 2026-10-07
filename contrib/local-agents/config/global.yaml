@@ -1,0 +1,9 @@
+# Folders every sandboxed agent gets, whatever the repo. See herdr_grants.py.
+read_only:
+  - ~/.config/git/config
+read_write: []
+# Extra environment variable names to pass into the sandbox.
+env: []
+# Extra PATH directories inside the sandbox; grant them above as well,
+# for example a mise or rustup toolchain directory.
+path: []

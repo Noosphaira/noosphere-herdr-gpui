@@ -1,0 +1,254 @@
+#!/usr/bin/env python3
+"""Run one command inside bubblewrap, confined to a git worktree.
+
+Usage: herdr-sandbox <worktree> -- <command> [args...]
+
+Binds the worktree and its repo's common .git read-write (hooks read-only),
+OpenCode's config read-only and its data directories read-write, and the
+grants from ~/.config/herdr-launch/{global,repos}.yaml. The rest of the home
+directory is an empty tmpfs.
+
+herdr's control socket is never bound in. Anything that can write to it can
+run commands in any pane, outside the sandbox. Instead, a filter socket is
+bound in that forwards only the agent-state reports OpenCode's herdr
+integration sends, and only for this pane.
+"""
+
+import json
+import os
+import shutil
+import signal
+import socket
+import subprocess
+import sys
+import tempfile
+import threading
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import herdr_grants  # noqa: E402
+
+HOME = Path.home()
+
+# Socket methods OpenCode's herdr integration uses. Both only describe the
+# calling pane's own agent.
+ALLOWED_METHODS = {"pane.report_agent", "pane.report_agent_session", "pane.release_agent"}
+MAX_REQUEST = 64 * 1024
+
+ETC_FILES = [
+    "passwd", "group", "hosts", "nsswitch.conf", "localtime", "ld.so.cache",
+    "ssl", "ca-certificates", "resolv.conf",
+]
+
+ENV_PASSTHROUGH = [
+    "TERM", "COLORTERM", "TERM_PROGRAM", "LANG", "LANGUAGE", "LC_ALL", "LC_CTYPE",
+    "LC_MESSAGES", "TZ", "USER", "LOGNAME", "SHELL",
+    "HERDR_ENV", "HERDR_PANE_ID", "HERDR_TAB_ID", "HERDR_WORKSPACE_ID",
+]
+
+SANDBOX_SOCKET_DIR = "/run/herdr-filter"
+
+
+def die(message):
+    print(f"herdr-sandbox: {message}", file=sys.stderr)
+    sys.exit(2)
+
+
+def git(*args, cwd):
+    result = subprocess.run(["git", *args], cwd=cwd, capture_output=True, text=True)
+    if result.returncode != 0:
+        die(f"git {' '.join(args)} failed in {cwd}: {result.stderr.strip()}")
+    return result.stdout.strip()
+
+
+# --- herdr socket filter -----------------------------------------------------
+
+def reply(conn, request_id, code, message):
+    body = {"id": request_id, "error": {"code": code, "message": message}}
+    conn.sendall((json.dumps(body) + "\n").encode())
+
+
+def forward(line, upstream_path):
+    with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as up:
+        up.settimeout(5)
+        up.connect(upstream_path)
+        up.sendall(line)
+        data = b""
+        while not data.endswith(b"\n") and len(data) < MAX_REQUEST:
+            chunk = up.recv(4096)
+            if not chunk:
+                break
+            data += chunk
+        return data
+
+
+def serve_filter_client(conn, upstream_path, pane_id):
+    with conn:
+        conn.settimeout(10)
+        buffer = b""
+        while True:
+            try:
+                chunk = conn.recv(4096)
+            except OSError:
+                return
+            if not chunk:
+                return
+            buffer += chunk
+            if len(buffer) > MAX_REQUEST:
+                return
+            while b"\n" in buffer:
+                line, buffer = buffer.split(b"\n", 1)
+                try:
+                    request = json.loads(line)
+                    request_id = request.get("id")
+                    method = request.get("method")
+                    params = request.get("params") or {}
+                except (ValueError, AttributeError):
+                    reply(conn, None, "invalid_request", "not a JSON object")
+                    continue
+                if method not in ALLOWED_METHODS:
+                    reply(conn, request_id, "forbidden", f"{method} is not allowed from the sandbox")
+                    continue
+                if params.get("pane_id") != pane_id:
+                    reply(conn, request_id, "forbidden", "agents may only report their own pane")
+                    continue
+                try:
+                    conn.sendall(forward(line + b"\n", upstream_path) or b"")
+                except OSError as error:
+                    reply(conn, request_id, "unavailable", str(error))
+
+
+def start_filter(upstream_path, pane_id, directory):
+    path = os.path.join(directory, "herdr.sock")
+    server = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+    server.bind(path)
+    server.listen(8)
+
+    def accept_loop():
+        while True:
+            try:
+                conn, _ = server.accept()
+            except OSError:
+                return
+            threading.Thread(
+                target=serve_filter_client, args=(conn, upstream_path, pane_id), daemon=True
+            ).start()
+
+    threading.Thread(target=accept_loop, daemon=True).start()
+    return server
+
+
+# --- bubblewrap command ------------------------------------------------------
+
+def bind_args(flag, source, target=None):
+    return [flag, str(source), str(target or source)]
+
+
+def build_bwrap(worktree, common_git, grants, command, filter_dir):
+    args = [
+        "bwrap",
+        "--die-with-parent",
+        "--unshare-user", "--unshare-pid", "--unshare-ipc", "--unshare-uts", "--unshare-cgroup-try",
+        "--proc", "/proc",
+        "--dev", "/dev",
+        "--tmpfs", "/tmp",
+        "--ro-bind", "/usr", "/usr",
+        "--symlink", "usr/bin", "/bin",
+        "--symlink", "usr/bin", "/sbin",
+        "--symlink", "usr/lib", "/lib",
+        "--symlink", "usr/lib", "/lib64",
+    ]
+    for name in ETC_FILES:
+        source = Path("/etc", name)
+        if source.exists():
+            # resolv.conf is a symlink into /run; bind its target in its place.
+            args += bind_args("--ro-bind", source.resolve(), source)
+
+    args += ["--tmpfs", str(HOME)]
+    for sub in [".local/share/opencode", ".local/state/opencode", ".cache/opencode"]:
+        path = HOME / sub
+        path.mkdir(parents=True, exist_ok=True)
+        args += bind_args("--bind", path)
+    args += bind_args("--ro-bind", HOME / ".config/opencode")
+
+    for path in grants["read_only"]:
+        args += bind_args("--ro-bind", path)
+    for path in grants["read_write"]:
+        args += bind_args("--bind", path)
+
+    args += bind_args("--bind", common_git)
+    args += bind_args("--bind", worktree)
+    # Later binds win, so hooks stay read-only over the read-write .git.
+    hooks = common_git / "hooks"
+    if hooks.is_dir():
+        args += bind_args("--ro-bind", hooks)
+
+    executable = Path(shutil.which(command[0]) or command[0]).resolve()
+    if not executable.is_file():
+        die(f"command not found: {command[0]}")
+    if not str(executable).startswith("/usr/"):
+        args += bind_args("--ro-bind", executable)
+
+    if filter_dir:
+        args += bind_args("--ro-bind", filter_dir, SANDBOX_SOCKET_DIR)
+
+    args += ["--clearenv"]
+    for name in ENV_PASSTHROUGH + grants["env"]:
+        if name in os.environ:
+            args += ["--setenv", name, os.environ[name]]
+    path_dirs = [str(executable.parent)] + grants["path"] + ["/usr/local/bin", "/usr/bin"]
+    args += ["--setenv", "HOME", str(HOME), "--setenv", "PATH", ":".join(path_dirs)]
+    args += ["--setenv", "HERDR_SANDBOX", "1"]
+    if filter_dir:
+        args += ["--setenv", "HERDR_SOCKET_PATH", f"{SANDBOX_SOCKET_DIR}/herdr.sock"]
+    args += ["--chdir", str(worktree), "--", str(executable), *command[1:]]
+    return args
+
+
+def main():
+    argv = sys.argv[1:]
+    if "--" not in argv or argv.index("--") != 1 or len(argv) < 3:
+        die("usage: herdr-sandbox <worktree> -- <command> [args...]")
+    worktree = Path(argv[0]).expanduser().resolve()
+    command = argv[2:]
+    if not worktree.is_dir():
+        die(f"not a directory: {worktree}")
+
+    common_git = Path(git("rev-parse", "--path-format=absolute", "--git-common-dir", cwd=worktree))
+    if common_git.name != ".git":
+        die(f"unsupported repository layout: common git dir is {common_git}")
+    repo = common_git.parent
+    if worktree == repo:
+        die("refusing to sandbox the main checkout; run agents in a linked worktree")
+
+    try:
+        grants = herdr_grants.load(repo)
+    except herdr_grants.GrantError as error:
+        die(str(error))
+
+    upstream = os.environ.get("HERDR_SOCKET_PATH")
+    pane_id = os.environ.get("HERDR_PANE_ID")
+    filter_dir = None
+    server = None
+    if upstream and pane_id:
+        runtime = os.environ.get("XDG_RUNTIME_DIR") or tempfile.gettempdir()
+        filter_dir = tempfile.mkdtemp(prefix="herdr-sandbox-", dir=runtime)
+        server = start_filter(upstream, pane_id, filter_dir)
+
+    child = subprocess.Popen(build_bwrap(worktree, common_git, grants, command, filter_dir))
+    # The terminal delivers Ctrl-C and friends to the whole foreground group,
+    # so the child sees them directly. Ignore them here and wait for it.
+    for sig in (signal.SIGINT, signal.SIGQUIT, signal.SIGTSTP):
+        signal.signal(sig, signal.SIG_IGN)
+    signal.signal(signal.SIGTERM, lambda *_: child.terminate())
+    signal.signal(signal.SIGHUP, lambda *_: child.terminate())
+    code = child.wait()
+
+    if server:
+        server.close()
+        shutil.rmtree(filter_dir, ignore_errors=True)
+    sys.exit(code if code >= 0 else 128 - code)
+
+
+if __name__ == "__main__":
+    main()
