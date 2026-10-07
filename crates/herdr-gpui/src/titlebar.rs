@@ -255,7 +255,6 @@ impl HerdrWindow {
             .flex()
             .flex_none()
             .items_center()
-            .child(self.render_launch_team_button(window.viewport_size().width, cx))
             .children(self.render_git_button(cx))
             .child(
                 div()

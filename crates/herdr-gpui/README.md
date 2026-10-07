@@ -1113,7 +1113,7 @@ the trust decision is local.
 
 ## Launch Team
 
-The **Launch team** button in the title bar (also **Launch Team** in the
+The **Launch team** button at the top of the sidebar, above Spaces (also **Launch Team** in the
 command palette, `cmd-shift-l`, and **Launch team...** in a Git workspace's
 right-click menu) starts one sandboxed OpenCode agent per role of a team on a
 new worktree, and gives each the same task. Pick one of the repositories open

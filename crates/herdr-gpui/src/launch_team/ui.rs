@@ -12,9 +12,6 @@ use crate::{
 };
 use gpui::{prelude::*, *};
 
-/// The narrowest window whose title bar spells out the Launch team button.
-const LABELLED_WIDTH: f32 = 1000.;
-
 impl HerdrWindow {
     pub(crate) fn poll_launch_team(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let open = self.menu.page == Some(Page::LaunchTeam);
@@ -99,42 +96,49 @@ impl HerdrWindow {
         window.focus(&fields[next], cx);
     }
 
-    /// The title bar's button: Launch team is always one click away. A narrow
-    /// window keeps only the icon, so tabs and status keep their room.
-    pub(crate) fn render_launch_team_button(
-        &self,
-        window_width: Pixels,
-        cx: &mut Context<Self>,
-    ) -> Stateful<Div> {
+    /// The sidebar's first row: Launch team is always one click away.
+    pub(crate) fn render_launch_team_button(&self, cx: &mut Context<Self>) -> Div {
         let theme = &self.theme;
+        // A filled accent button, so the one thing to start from stands out
+        // from the sidebar's quiet rows.
+        let accent = crate::menu::accent(theme);
+        let ink = rgb(theme.background);
         div()
-            .id("titlebar-launch-team")
-            .debug_selector(|| "titlebar-launch-team".into())
-            .flex()
+            .debug_selector(|| "sidebar-launch-team-row".into())
             .flex_none()
-            .items_center()
-            .gap(px(6.))
-            .h(px(24.))
-            .px(px(8.))
-            .mr(px(4.))
-            .rounded(px(crate::config::corners::CONTROL))
-            .cursor_pointer()
-            .hover(|button| button.bg(rgb(theme.active)))
+            .h(px(crate::sidebar::LAUNCH_TEAM_ROW_HEIGHT))
+            .px(px(10.))
+            .pt(px(10.))
+            .pb(px(6.))
             .child(
-                svg()
-                    .path("icons/agent-opencode.svg")
-                    .size(px(14.))
-                    .flex_none()
-                    .text_color(rgb(theme.foreground)),
+                div()
+                    .id("sidebar-launch-team")
+                    .debug_selector(|| "sidebar-launch-team".into())
+                    .size_full()
+                    .flex()
+                    .items_center()
+                    .justify_center()
+                    .gap(px(8.))
+                    .rounded(px(crate::config::corners::CONTROL))
+                    .bg(accent)
+                    .text_color(ink)
+                    .font_weight(FontWeight::SEMIBOLD)
+                    .cursor_pointer()
+                    .hover(|button| button.opacity(0.85))
+                    .child(
+                        svg()
+                            .path("icons/play.svg")
+                            .size(px(14.))
+                            .flex_none()
+                            .text_color(ink),
+                    )
+                    .child("Launch team")
+                    .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
+                    .on_click(cx.listener(|this, _, window, cx| {
+                        cx.stop_propagation();
+                        this.open_launch_team_for_focused(window, cx);
+                    })),
             )
-            .when(window_width >= px(LABELLED_WIDTH), |button| {
-                button.child(div().text_color(rgb(theme.foreground)).child("Launch team"))
-            })
-            .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
-            .on_click(cx.listener(|this, _, window, cx| {
-                cx.stop_propagation();
-                this.open_launch_team_for_focused(window, cx);
-            }))
     }
 
     /// Fill the path field from the desktop's folder picker. Only offered
@@ -420,7 +424,7 @@ impl HerdrWindow {
                     .border_color(rgb(theme.active))
                     .child(
                         svg()
-                            .path("icons/agent-opencode.svg")
+                            .path("icons/play.svg")
                             .size(px(16.))
                             .flex_none()
                             .text_color(muted),

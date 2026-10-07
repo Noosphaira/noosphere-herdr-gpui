@@ -125,7 +125,7 @@ impl WorkspaceMenuAction {
             Self::ClearTeleported => "icons/x.svg",
             Self::Checkpoints => "icons/refresh.svg",
             Self::FanOut => "icons/fan-out.svg",
-            Self::LaunchTeam => "icons/agent-opencode.svg",
+            Self::LaunchTeam => "icons/play.svg",
             Self::Script(crate::worktree_scripts::ScriptKind::Setup) => "icons/refresh.svg",
             Self::Script(_) => "icons/play.svg",
             Self::PullRequest => return None,

@@ -52,6 +52,9 @@ use row::{RowBadge, first_text};
 use workspaces::visible_workspace_entries;
 
 pub(crate) const DEVICE_FOOTER_HEIGHT: f32 = 40.;
+/// The Launch team row above the spaces; fixed, like the footer, so the
+/// split between spaces and agents can leave it out.
+pub(crate) const LAUNCH_TEAM_ROW_HEIGHT: f32 = 50.;
 
 #[derive(Clone, Copy)]
 pub(crate) enum SidebarDrag {

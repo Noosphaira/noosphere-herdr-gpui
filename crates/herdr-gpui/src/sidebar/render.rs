@@ -3,7 +3,7 @@
 //! caches only.
 
 use super::{
-    DEVICE_FOOTER_HEIGHT, STATUS_WIDTH, SidebarDrag,
+    DEVICE_FOOTER_HEIGHT, LAUNCH_TEAM_ROW_HEIGHT, STATUS_WIDTH, SidebarDrag,
     agents::Indicators,
     agents_sort,
     cell::{Cell, Fold, RowContext, RowData, WorkspaceRow, layout_for},
@@ -542,6 +542,7 @@ impl HerdrWindow {
             .bg(rgb(theme.sidebar_background()))
             .border_r_1()
             .border_color(rgb(theme.active))
+            .child(self.render_launch_team_button(cx))
             // Zero flex bases keep long workspace lists from displacing agents.
             .child(
                 div()
@@ -725,12 +726,14 @@ impl HerdrWindow {
                                             SidebarDrag::Split => {
                                                 let height = (f32::from(bounds.size.height)
                                                     - 6.
-                                                    - DEVICE_FOOTER_HEIGHT)
+                                                    - DEVICE_FOOTER_HEIGHT
+                                                    - LAUNCH_TEAM_ROW_HEIGHT)
                                                     .max(1.);
                                                 this.sidebar_split = Some(
                                                     ((f32::from(
                                                         event.position.y - bounds.origin.y,
-                                                    ) - 3.)
+                                                    ) - 3.
+                                                        - LAUNCH_TEAM_ROW_HEIGHT)
                                                         / height)
                                                         .clamp(0.1, 0.9),
                                                 );
