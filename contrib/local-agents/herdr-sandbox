@@ -48,6 +48,17 @@ ENV_PASSTHROUGH = [
 
 SANDBOX_SOCKET_DIR = "/run/herdr-filter"
 
+# OpenCode's own outbound calls, all off: update checks, conversation
+# sharing, the models.dev catalog, language-server and plugin downloads.
+# Inference goes only to the provider in opencode.json.
+OPENCODE_OFFLINE = {
+    "OPENCODE_DISABLE_AUTOUPDATE": "1",
+    "OPENCODE_DISABLE_SHARE": "1",
+    "OPENCODE_DISABLE_MODELS_FETCH": "1",
+    "OPENCODE_DISABLE_LSP_DOWNLOAD": "1",
+    "OPENCODE_DISABLE_DEFAULT_PLUGINS": "1",
+}
+
 
 def die(message):
     print(f"herdr-sandbox: {message}", file=sys.stderr)
@@ -199,6 +210,8 @@ def build_bwrap(worktree, common_git, grants, command, filter_dir):
     path_dirs = [str(executable.parent)] + grants["path"] + ["/usr/local/bin", "/usr/bin"]
     args += ["--setenv", "HOME", str(HOME), "--setenv", "PATH", ":".join(path_dirs)]
     args += ["--setenv", "HERDR_SANDBOX", "1"]
+    for name, value in OPENCODE_OFFLINE.items():
+        args += ["--setenv", name, value]
     if filter_dir:
         args += ["--setenv", "HERDR_SOCKET_PATH", f"{SANDBOX_SOCKET_DIR}/herdr.sock"]
     args += ["--chdir", str(worktree), "--", str(executable), *command[1:]]
