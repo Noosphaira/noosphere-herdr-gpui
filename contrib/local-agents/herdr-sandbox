@@ -1,0 +1,207 @@
+#!/usr/bin/env python3
+"""Run one command inside bubblewrap, confined to a git worktree.
+
+Usage: herdr-sandbox [--team-dir DIR --role ROLE] <worktree> -- <command> [args...]
+
+Binds the worktree and its repo's common .git read-write (hooks read-only),
+OpenCode's config read-only and its data directories read-write, and the
+grants from ~/.config/herdr-launch/{global,repos}.yaml. The rest of the home
+directory is an empty tmpfs.
+
+herdr's control socket is never bound in. Anything that can write to it can
+run commands in any pane, outside the sandbox. Instead, a filter socket is
+bound in (see herdr_filter.py): it forwards this pane's agent-state reports
+and, for a launched team, the `team` command's messages to teammates.
+"""
+
+import os
+import shutil
+import signal
+import subprocess
+import sys
+import tempfile
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import herdr_filter  # noqa: E402
+import herdr_grants  # noqa: E402
+
+LAUNCH_DIR = Path(__file__).resolve().parent
+
+HOME = Path.home()
+
+ETC_FILES = [
+    "passwd", "group", "hosts", "nsswitch.conf", "localtime", "ld.so.cache",
+    "ssl", "ca-certificates", "resolv.conf",
+]
+
+ENV_PASSTHROUGH = [
+    "TERM", "COLORTERM", "TERM_PROGRAM", "LANG", "LANGUAGE", "LC_ALL", "LC_CTYPE",
+    "LC_MESSAGES", "TZ", "USER", "LOGNAME", "SHELL",
+    "HERDR_ENV", "HERDR_PANE_ID", "HERDR_TAB_ID", "HERDR_WORKSPACE_ID",
+]
+
+SANDBOX_SOCKET_DIR = "/run/herdr-filter"
+# The `team` command, bound read-only with the module it needs.
+SANDBOX_TEAM_DIR = "/run/herdr-team"
+
+# OpenCode's own outbound calls, all off: update checks, conversation
+# sharing, the models.dev catalog, language-server and plugin downloads.
+# Inference goes only to the provider in opencode.json.
+OPENCODE_OFFLINE = {
+    "OPENCODE_DISABLE_AUTOUPDATE": "1",
+    "OPENCODE_DISABLE_SHARE": "1",
+    "OPENCODE_DISABLE_MODELS_FETCH": "1",
+    "OPENCODE_DISABLE_LSP_DOWNLOAD": "1",
+    "OPENCODE_DISABLE_DEFAULT_PLUGINS": "1",
+}
+
+
+def die(message):
+    print(f"herdr-sandbox: {message}", file=sys.stderr)
+    sys.exit(2)
+
+
+def git(*args, cwd):
+    result = subprocess.run(["git", *args], cwd=cwd, capture_output=True, text=True)
+    if result.returncode != 0:
+        die(f"git {' '.join(args)} failed in {cwd}: {result.stderr.strip()}")
+    return result.stdout.strip()
+
+
+# --- bubblewrap command ------------------------------------------------------
+
+def bind_args(flag, source, target=None):
+    return [flag, str(source), str(target or source)]
+
+
+def build_bwrap(worktree, common_git, grants, command, filter_dir, role=None):
+    args = [
+        "bwrap",
+        "--die-with-parent",
+        "--unshare-user", "--unshare-pid", "--unshare-ipc", "--unshare-uts", "--unshare-cgroup-try",
+        "--proc", "/proc",
+        "--dev", "/dev",
+        "--tmpfs", "/tmp",
+        "--ro-bind", "/usr", "/usr",
+        "--symlink", "usr/bin", "/bin",
+        "--symlink", "usr/bin", "/sbin",
+        "--symlink", "usr/lib", "/lib",
+        "--symlink", "usr/lib", "/lib64",
+    ]
+    for name in ETC_FILES:
+        source = Path("/etc", name)
+        if source.exists():
+            # resolv.conf is a symlink into /run; bind its target in its place.
+            args += bind_args("--ro-bind", source.resolve(), source)
+
+    args += ["--tmpfs", str(HOME)]
+    for sub in [".local/share/opencode", ".local/state/opencode", ".cache/opencode"]:
+        path = HOME / sub
+        path.mkdir(parents=True, exist_ok=True)
+        args += bind_args("--bind", path)
+    args += bind_args("--ro-bind", HOME / ".config/opencode")
+
+    for path in grants["read_only"]:
+        args += bind_args("--ro-bind", path)
+    for path in grants["read_write"]:
+        args += bind_args("--bind", path)
+
+    args += bind_args("--bind", common_git)
+    args += bind_args("--bind", worktree)
+    # Later binds win, so hooks stay read-only over the read-write .git.
+    hooks = common_git / "hooks"
+    if hooks.is_dir():
+        args += bind_args("--ro-bind", hooks)
+
+    executable = Path(shutil.which(command[0]) or command[0]).resolve()
+    if not executable.is_file():
+        die(f"command not found: {command[0]}")
+    if not str(executable).startswith("/usr/"):
+        args += bind_args("--ro-bind", executable)
+
+    if filter_dir:
+        args += bind_args("--ro-bind", filter_dir, SANDBOX_SOCKET_DIR)
+    if role:
+        args += bind_args("--ro-bind", LAUNCH_DIR / "team", f"{SANDBOX_TEAM_DIR}/team")
+
+    args += ["--clearenv"]
+    for name in ENV_PASSTHROUGH + grants["env"]:
+        if name in os.environ:
+            args += ["--setenv", name, os.environ[name]]
+    path_dirs = [str(executable.parent)] + grants["path"] + ["/usr/local/bin", "/usr/bin"]
+    if role:
+        path_dirs.insert(0, SANDBOX_TEAM_DIR)
+        args += ["--setenv", "HERDR_TEAM_ROLE", role]
+    args += ["--setenv", "HOME", str(HOME), "--setenv", "PATH", ":".join(path_dirs)]
+    args += ["--setenv", "HERDR_SANDBOX", "1"]
+    for name, value in OPENCODE_OFFLINE.items():
+        args += ["--setenv", name, value]
+    if filter_dir:
+        args += ["--setenv", "HERDR_SOCKET_PATH", f"{SANDBOX_SOCKET_DIR}/herdr.sock"]
+    args += ["--chdir", str(worktree), "--", str(executable), *command[1:]]
+    return args
+
+
+def parse_args(argv):
+    team_dir = role = None
+    while argv and argv[0] in ("--team-dir", "--role"):
+        if len(argv) < 2:
+            die(f"{argv[0]} needs a value")
+        if argv[0] == "--team-dir":
+            team_dir = argv[1]
+        else:
+            role = argv[1]
+        argv = argv[2:]
+    if bool(team_dir) != bool(role):
+        die("--team-dir and --role go together")
+    if "--" not in argv or argv.index("--") != 1 or len(argv) < 3:
+        die("usage: herdr-sandbox [--team-dir DIR --role ROLE] <worktree> -- <command> [args...]")
+    return team_dir, role, Path(argv[0]).expanduser().resolve(), argv[2:]
+
+
+def main():
+    team_dir, role, worktree, command = parse_args(sys.argv[1:])
+    if not worktree.is_dir():
+        die(f"not a directory: {worktree}")
+
+    common_git = Path(git("rev-parse", "--path-format=absolute", "--git-common-dir", cwd=worktree))
+    if common_git.name != ".git":
+        die(f"unsupported repository layout: common git dir is {common_git}")
+    repo = common_git.parent
+    if worktree == repo:
+        die("refusing to sandbox the main checkout; run agents in a linked worktree")
+
+    try:
+        grants = herdr_grants.load(repo)
+    except herdr_grants.GrantError as error:
+        die(str(error))
+
+    upstream = os.environ.get("HERDR_SOCKET_PATH")
+    pane_id = os.environ.get("HERDR_PANE_ID")
+    filter_dir = None
+    server = None
+    if upstream and pane_id:
+        runtime = os.environ.get("XDG_RUNTIME_DIR") or tempfile.gettempdir()
+        filter_dir = tempfile.mkdtemp(prefix="herdr-sandbox-", dir=runtime)
+        server = herdr_filter.Filter(upstream, pane_id, team_dir, role).start(filter_dir)
+    elif role:
+        die("a team member needs herdr's socket and pane; run it in a herdr pane")
+
+    child = subprocess.Popen(build_bwrap(worktree, common_git, grants, command, filter_dir, role))
+    # The terminal delivers Ctrl-C and friends to the whole foreground group,
+    # so the child sees them directly. Ignore them here and wait for it.
+    for sig in (signal.SIGINT, signal.SIGQUIT, signal.SIGTSTP):
+        signal.signal(sig, signal.SIG_IGN)
+    signal.signal(signal.SIGTERM, lambda *_: child.terminate())
+    signal.signal(signal.SIGHUP, lambda *_: child.terminate())
+    code = child.wait()
+
+    if server:
+        server.close()
+        shutil.rmtree(filter_dir, ignore_errors=True)
+    sys.exit(code if code >= 0 else 128 - code)
+
+
+if __name__ == "__main__":
+    main()

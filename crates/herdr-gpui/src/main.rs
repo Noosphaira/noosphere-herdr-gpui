@@ -43,6 +43,7 @@ mod icons;
 mod input;
 mod integrations;
 mod keymap;
+mod launch_team;
 mod lenient;
 mod links;
 mod listening_ports;
@@ -54,6 +55,7 @@ mod menus;
 #[cfg(feature = "mockup")]
 mod mockup;
 mod motion;
+mod multiline_input;
 mod navigation;
 mod notifications;
 mod osc52;

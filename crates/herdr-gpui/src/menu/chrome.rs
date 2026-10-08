@@ -575,6 +575,8 @@ impl HerdrWindow {
             panel = panel.child(self.render_checkpoints(cx));
         } else if page == Page::FanOut {
             panel = panel.child(self.render_fan_out(cx));
+        } else if page == Page::LaunchTeam {
+            panel = panel.child(self.render_launch_team(cx));
         } else if page == Page::Git {
             panel = panel.child(self.render_git_menu(cx));
         } else if page == Page::GitCommit {

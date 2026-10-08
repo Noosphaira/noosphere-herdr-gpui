@@ -226,6 +226,12 @@ struct SettingsWindow {
 }
 
 impl SettingsWindow {
+    /// The window was laid out for a 12 px interface font; its text follows
+    /// the configured `[ui]` size from there, as the main window's does.
+    fn text_scale(&self) -> f32 {
+        (self.config.ui.size / 12.).clamp(0.75, 3.)
+    }
+
     fn new(source: WeakEntity<HerdrWindow>, cx: &mut Context<Self>) -> Self {
         let appearance = cx
             .try_global::<crate::app::InitialAppearance>()
@@ -570,7 +576,7 @@ impl SettingsWindow {
                     .py(px(20.))
                     .child(
                         div()
-                            .text_size(px(18.))
+                            .text_size(px(18. * self.text_scale()))
                             .font_weight(FontWeight::SEMIBOLD)
                             .child("Herdr"),
                     )
@@ -667,8 +673,8 @@ impl Render for SettingsWindow {
             .flex_col()
             .overflow_hidden()
             .text_font(&self.config.ui)
-            .text_size(px(12.))
-            .line_height(px(18.))
+            .text_size(px(12. * self.text_scale()))
+            .line_height(px(18. * self.text_scale()))
             .bg(rgb(theme.background))
             .text_color(rgb(theme.foreground))
             .children(header)
@@ -685,8 +691,8 @@ impl Render for SettingsWindow {
                         .p(px(28.))
                         .child(
                             div()
-                                .text_size(px(28.))
-                                .line_height(px(36.))
+                                .text_size(px(28. * self.text_scale()))
+                                .line_height(px(36. * self.text_scale()))
                                 .font_weight(FontWeight::SEMIBOLD)
                                 .child(self.section.label()),
                         )
@@ -711,7 +717,7 @@ impl Render for SettingsWindow {
                     .gap(px(12.))
                     .border_t_1()
                     .border_color(rgb(theme.active))
-                    .text_size(px(11.))
+                    .text_size(px(11. * self.text_scale()))
                     .child(
                         div().debug_selector(|| "settings-footer-status".into()).flex_1().min_w_0().child(
                             self.error

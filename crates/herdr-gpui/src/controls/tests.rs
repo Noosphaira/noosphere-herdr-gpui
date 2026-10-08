@@ -10,12 +10,13 @@ fn snapshot() -> ClientShellSnapshot {
 #[test]
 fn catalog_has_all_native_commands_and_gpui_shortcuts() {
     use Command::*;
-    let expected: [(Command, &[&str]); 87] = [
+    let expected: [(Command, &[&str]); 88] = [
         (OpenNotificationTarget, &["cmd-alt-n"]),
         (Logs, &[]),
         (NewWindow, &["cmd-alt-shift-n"]),
         (Workspace, &["cmd-shift-n"]),
         (NewWorktree, &["cmd-n"]),
+        (LaunchTeam, &["cmd-shift-l"]),
         (PreviousWorkspace, &[]),
         (NextWorkspace, &[]),
         (WorkspaceNumber(1), &[]),

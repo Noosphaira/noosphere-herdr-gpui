@@ -11,15 +11,19 @@ fn sidebar_split_drag_clamps_releases_outside_and_resets(cx: &mut gpui::TestAppC
     let initial_spaces = cx.debug_bounds("spaces-section").unwrap();
     let initial_agents = cx.debug_bounds("agents-section").unwrap();
     let footer = cx.debug_bounds("device-footer").unwrap();
+    // The Launch team row sits above the split, which divides what is left.
+    let launch = cx.debug_bounds("sidebar-launch-team-row").unwrap();
+    assert_eq!(launch.bottom(), initial_spaces.top());
     assert!((initial_spaces.size.height - initial_agents.size.height).abs() <= px(1.));
 
     for (requested, expected) in [(0.7, 0.7), (0.3, 0.3), (-0.5, 0.1), (1.5, 0.9)] {
         let divider = cx.debug_bounds("sidebar-split-resize").unwrap();
-        let available = sidebar.size.height - divider.size.height - footer.size.height;
+        let available =
+            sidebar.size.height - launch.size.height - divider.size.height - footer.size.height;
         // Move and release outside the sidebar as well as outside the divider.
         let end = point(
             sidebar.right() + px(100.),
-            sidebar.top() + divider.size.height / 2. + available * requested,
+            launch.bottom() + divider.size.height / 2. + available * requested,
         );
         cx.simulate_mouse_down(divider.center(), MouseButton::Left, Modifiers::default());
         cx.simulate_mouse_move(end, MouseButton::Left, Modifiers::default());
@@ -148,6 +152,10 @@ fn sidebar_split_preserves_independent_scrolling_and_agents_toggle(cx: &mut gpui
                 current_spaces.size.height,
                 cx.debug_bounds("sidebar").unwrap().size.height
                     - cx.debug_bounds("device-footer").unwrap().size.height
+                    - cx.debug_bounds("sidebar-launch-team-row")
+                        .unwrap()
+                        .size
+                        .height
             );
         }
     }

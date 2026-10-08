@@ -260,6 +260,10 @@ impl HerdrWindow {
                 self.open_new_worktree(window, cx);
                 return;
             }
+            Command::LaunchTeam => {
+                self.open_launch_team_for_focused(window, cx);
+                return;
+            }
             // Every interactive creation path ends here, so Herdr's name prompt
             // covers buttons, menus, shortcuts, and the palette alike.
             Command::Tab | Command::Workspace if self.open_name_prompt(command, window, cx) => {

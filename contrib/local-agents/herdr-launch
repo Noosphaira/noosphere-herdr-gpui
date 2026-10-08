@@ -1,0 +1,269 @@
+#!/usr/bin/env python3
+"""Launch a team of sandboxed OpenCode agents on a new git worktree.
+
+Usage:
+  herdr-launch --list-teams
+  herdr-launch --team <team> --repo <path> --branch <name> --task <text>
+               [--base <ref>] [--session <name>] [--json]
+
+Creates the worktree through herdr, opens one pane per role, starts
+`opencode --agent <role>` in each pane through herdr-sandbox as a team member,
+waits until herdr sees each agent ready, then gives the task to the first role
+of the team's `flow`. Roles hand work on with the `team` command; a watcher
+(herdr-team-watch) reminds an agent that stops without handing off and
+notifies the user when someone needs them or the team is done.
+
+Team file (~/.config/herdr-launch/teams/<team>.yaml):
+  roles: [ui-designer, coder, reviewer]   # one pane each, left to right
+  flow: [ui-designer, coder, reviewer]    # who works when (default: roles)
+  review_rounds: 2                        # messages back to an earlier role
+
+Progress goes to stderr as "step <n>/<total>: <text>". On failure nothing is
+cleaned up; the failing step and its output are reported (as JSON with --json).
+"""
+
+import argparse
+import json
+import shlex
+import subprocess
+import sys
+import time
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import herdr_grants  # noqa: E402
+import herdr_team  # noqa: E402
+
+TEAMS_DIR = herdr_grants.CONFIG_DIR / "teams"
+AGENTS_DIR = Path.home() / ".config/opencode/agents"
+SANDBOX = Path(__file__).resolve().parent / "herdr-sandbox"
+WATCHER = Path(__file__).resolve().parent / "herdr-team-watch"
+STEPS = 6
+# Below the GUI's 60 s script idle limit; agents are ready in about a second.
+AGENT_READY_TIMEOUT_MS = 45_000
+
+
+class StepError(Exception):
+    def __init__(self, step, message, output=""):
+        super().__init__(message)
+        self.step = step
+        self.output = output
+
+
+class Launcher:
+    def __init__(self, args):
+        self.args = args
+        self.step_name = "validate"
+
+    def progress(self, number, name, text):
+        self.step_name = name
+        print(f"step {number}/{STEPS}: {text}", file=sys.stderr, flush=True)
+
+    def run(self, command, check=True):
+        result = subprocess.run(command, capture_output=True, text=True)
+        if check and result.returncode != 0:
+            raise StepError(
+                self.step_name,
+                f"{shlex.join(command)} exited with {result.returncode}",
+                (result.stdout + result.stderr).strip(),
+            )
+        return result
+
+    def herdr(self, *args):
+        command = ["herdr"]
+        if self.args.session:
+            command += ["--session", self.args.session]
+        result = self.run(command + list(args))
+        try:
+            return json.loads(result.stdout)["result"] if result.stdout.strip() else {}
+        except (ValueError, KeyError) as error:
+            raise StepError(self.step_name, f"unexpected herdr output: {error}", result.stdout) from error
+
+    def git(self, *args, check=True):
+        return self.run(["git", "-C", str(self.repo), *args], check=check)
+
+    # --- steps ---------------------------------------------------------------
+
+    def validate(self):
+        self.progress(1, "validate", "checking team, repo, branch and grants")
+        team_file = TEAMS_DIR / f"{self.args.team}.yaml"
+        if not team_file.is_file():
+            raise StepError("validate", f"no team file {team_file}")
+        team = herdr_grants.read_yaml(team_file, {})
+        roles = team.get("roles") if isinstance(team, dict) else None
+        if not roles or not all(isinstance(r, str) for r in roles):
+            raise StepError("validate", f"{team_file} needs a non-empty roles list")
+        if len(set(roles)) != len(roles):
+            raise StepError("validate", f"{team_file} lists a role twice")
+        missing = [r for r in roles if not (AGENTS_DIR / f"{r}.md").is_file()]
+        if missing:
+            raise StepError("validate", f"no OpenCode agent file for: {', '.join(missing)} in {AGENTS_DIR}")
+        self.roles = roles
+        flow = team.get("flow", roles)
+        if not isinstance(flow, list) or sorted(flow) != sorted(roles):
+            raise StepError("validate", f"{team_file}: flow must list each role exactly once")
+        self.flow = flow
+        rounds = team.get("review_rounds", 2)
+        if not isinstance(rounds, int) or not 0 <= rounds <= 10:
+            raise StepError("validate", f"{team_file}: review_rounds must be a number from 0 to 10")
+        self.review_rounds = rounds
+
+        # Any path inside the repo works, including its .git directory (what
+        # the GUI knows) or a linked worktree: agents always branch from the
+        # main checkout's repository.
+        given = Path(self.args.repo).expanduser().resolve()
+        common = self.run(
+            ["git", "-C", str(given), "rev-parse", "--path-format=absolute", "--git-common-dir"],
+            check=False,
+        )
+        if common.returncode != 0:
+            raise StepError("validate", f"{given} is not inside a git repository")
+        common_dir = Path(common.stdout.strip())
+        if common_dir.name != ".git":
+            raise StepError("validate", f"unsupported repository layout: {common_dir}")
+        self.repo = common_dir.parent
+
+        branch = self.args.branch
+        if self.run(["git", "check-ref-format", "--branch", branch], check=False).returncode != 0:
+            raise StepError("validate", f"{branch!r} is not a valid branch name")
+        if self.git("show-ref", "--verify", "--quiet", f"refs/heads/{branch}", check=False).returncode == 0:
+            raise StepError("validate", f"branch {branch!r} already exists; pick a new name")
+        if not self.args.task.strip():
+            raise StepError("validate", "the task is empty")
+        try:
+            herdr_grants.load(self.repo)
+        except herdr_grants.GrantError as error:
+            raise StepError("validate", str(error)) from error
+
+    def create_worktree(self):
+        self.progress(2, "worktree", f"creating worktree for branch {self.args.branch}")
+        args = ["worktree", "create", "--cwd", str(self.repo), "--branch", self.args.branch, "--no-focus"]
+        if self.args.base:
+            args += ["--base", self.args.base]
+        result = self.herdr(*args)
+        try:
+            self.workspace_id = result["workspace"]["workspace_id"]
+            self.worktree = result["worktree"]["path"]
+            self.panes = {self.roles[0]: result["root_pane"]["pane_id"]}
+        except KeyError as error:
+            raise StepError("worktree", f"herdr worktree create gave no {error}", json.dumps(result)) from error
+
+    def create_panes(self):
+        self.progress(3, "panes", f"opening {len(self.roles)} panes")
+        previous = self.panes[self.roles[0]]
+        for role in self.roles[1:]:
+            result = self.herdr(
+                "pane", "split", previous, "--direction", "right", "--no-focus", "--cwd", self.worktree
+            )
+            previous = result["pane"]["pane_id"]
+            self.panes[role] = previous
+        for role, pane in self.panes.items():
+            self.herdr("pane", "rename", pane, role)
+
+    def start_agents(self):
+        self.progress(4, "start", "starting sandboxed agents")
+        self.team_dir = herdr_team.create(
+            self.workspace_id, self.args.branch, self.args.task.strip(), self.flow,
+            self.panes, self.review_rounds,
+        )
+        for role, pane in self.panes.items():
+            command = [
+                str(SANDBOX), "--team-dir", str(self.team_dir), "--role", role,
+                self.worktree, "--", "opencode", "--agent", role,
+            ]
+            self.herdr("pane", "run", pane, shlex.join(command))
+
+    def wait_ready(self):
+        self.progress(5, "ready", "waiting for herdr to see each agent ready")
+        for role, pane in self.panes.items():
+            deadline = time.monotonic() + AGENT_READY_TIMEOUT_MS / 1000
+            while True:
+                # agent wait fails at once while the pane has no agent yet.
+                remaining = int((deadline - time.monotonic()) * 1000)
+                if remaining <= 0:
+                    raise StepError("ready", f"{role} ({pane}) did not become ready", self.pane_tail(pane))
+                command = ["herdr"] + (["--session", self.args.session] if self.args.session else [])
+                command += ["agent", "wait", pane, "--until", "idle", "--timeout", str(remaining)]
+                if self.run(command, check=False).returncode == 0:
+                    break
+                time.sleep(0.5)
+
+    def deliver_task(self):
+        first = self.flow[0]
+        self.progress(6, "prompt", f"giving the task to {first} and starting the watcher")
+        after = self.flow[1] if len(self.flow) > 1 else None
+        handoff = (
+            f'When your part is done, hand off with: team send {after} "<what you did and where>"'
+            if after
+            else 'When you are done, finish with: team done "<summary>"'
+        )
+        self.herdr("agent", "prompt", self.panes[first], f"{self.args.task.strip()}\n\n[team] You go first. {handoff}")
+        watch = [str(WATCHER), str(self.team_dir)] + (["--session", self.args.session] if self.args.session else [])
+        with open(self.team_dir / "watch.log", "a") as log:
+            subprocess.Popen(watch, stdin=subprocess.DEVNULL, stdout=log, stderr=log, start_new_session=True)
+
+    def pane_tail(self, pane):
+        command = ["herdr"] + (["--session", self.args.session] if self.args.session else [])
+        result = self.run(command + ["pane", "read", pane, "--source", "recent-unwrapped", "--lines", "30"], check=False)
+        return result.stdout.strip()
+
+    def launch(self):
+        self.validate()
+        self.create_worktree()
+        self.create_panes()
+        self.start_agents()
+        self.wait_ready()
+        self.deliver_task()
+        return {
+            "ok": True,
+            "workspace_id": self.workspace_id,
+            "worktree": self.worktree,
+            "branch": self.args.branch,
+            "panes": self.panes,
+            "flow": self.flow,
+            "team_dir": str(self.team_dir),
+        }
+
+
+def main():
+    parser = argparse.ArgumentParser(prog="herdr-launch", description=__doc__.split("\n")[1])
+    parser.add_argument("--list-teams", action="store_true", help="print the team names as JSON and exit")
+    parser.add_argument("--team")
+    parser.add_argument("--repo")
+    parser.add_argument("--branch")
+    parser.add_argument("--task")
+    parser.add_argument("--base", help="ref to branch from (default: herdr's default)")
+    parser.add_argument("--session", help="herdr session name (default: the default session)")
+    parser.add_argument("--json", action="store_true", help="print the result as JSON")
+    args = parser.parse_args()
+    if args.list_teams:
+        teams = sorted(p.stem for p in TEAMS_DIR.glob("*.yaml")) if TEAMS_DIR.is_dir() else []
+        print(json.dumps({"teams": teams}))
+        return
+    missing = [f"--{n}" for n in ("team", "repo", "branch", "task") if getattr(args, n) is None]
+    if missing:
+        parser.error(f"missing {', '.join(missing)}")
+
+    launcher = Launcher(args)
+    try:
+        result = launcher.launch()
+    except StepError as error:
+        failure = {"ok": False, "step": error.step, "error": str(error), "output": error.output}
+        if args.json:
+            print(json.dumps(failure))
+        else:
+            print(f"herdr-launch: {error.step} failed: {error}", file=sys.stderr)
+            if error.output:
+                print(error.output, file=sys.stderr)
+        sys.exit(1)
+
+    if args.json:
+        print(json.dumps(result))
+    else:
+        print(f"workspace {result['workspace_id']}  worktree {result['worktree']}")
+        for role, pane in result["panes"].items():
+            print(f"  {role:<16} {pane}")
+
+
+if __name__ == "__main__":
+    main()

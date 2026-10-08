@@ -1,0 +1,5 @@
+# Extra folders per repo. A repo with no entry gets only its worktree and .git.
+# - repo: ~/code/myapp
+#   read_write: [~/design-assets/myapp]
+#   read_only: [~/code/shared-ui]
+[]

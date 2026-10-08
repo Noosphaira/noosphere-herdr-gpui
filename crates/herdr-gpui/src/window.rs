@@ -158,6 +158,8 @@ pub(crate) struct HerdrWindow {
     /// A prompt fanned out to several agents; once launched it outlives its
     /// dialog so the lanes can be compared later.
     pub(crate) fan_out: Option<crate::fan_out::FanOut>,
+    /// A team launch; once started it outlives its dialog until it finishes.
+    pub(crate) launch_team: Option<crate::launch_team::LaunchTeam>,
     pub(crate) git: git::Git,
     /// Notes waiting for their agents to be ready for them.
     pub(crate) deliveries: crate::agent_notes::Deliveries,
@@ -416,6 +418,7 @@ impl HerdrWindow {
         self.update_workspace_dialog(window, cx);
         self.poll_teleport(window, cx);
         self.poll_fan_out(window, cx);
+        self.poll_launch_team(window, cx);
         self.poll_device_setup(window, cx);
         self.poll_worktree_script(window, cx);
         self.poll_worktree_source(cx);
@@ -739,6 +742,7 @@ impl HerdrWindow {
             teleport_marks: crate::teleport::Marks::start(),
             teleport_follow: None,
             fan_out: None,
+            launch_team: None,
             git: git::Git::default(),
             deliveries: Default::default(),
             notes_width: crate::panel_resize::NOTES,

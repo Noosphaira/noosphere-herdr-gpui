@@ -1,0 +1,71 @@
+#!/usr/bin/env python3
+"""Talk to the rest of your team. Available inside a launched team's sandbox.
+
+  team info                      your role, the order of roles, and the task
+  team status                    every teammate's state (working, idle, ...)
+  team send <role> <message>     message a teammate; `-` reads it from stdin
+  team done <summary>            mark the team's work finished and notify the user
+
+A message to a busy teammate waits until it finishes its current step.
+"""
+
+import json
+import os
+import socket
+import sys
+
+
+def call(method, params=None):
+    path = os.environ.get("HERDR_SOCKET_PATH")
+    if not path or not os.environ.get("HERDR_TEAM_ROLE"):
+        sys.exit("team: not running inside a launched team")
+    request = json.dumps({"id": f"team:{method}", "method": method, "params": params or {}})
+    with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as conn:
+        conn.settimeout(30)
+        conn.connect(path)
+        conn.sendall(request.encode() + b"\n")
+        data = b""
+        while not data.endswith(b"\n"):
+            chunk = conn.recv(65536)
+            if not chunk:
+                break
+            data += chunk
+    answer = json.loads(data or b"{}")
+    if "error" in answer:
+        sys.exit(f"team: {answer['error'].get('message', 'failed')}")
+    return answer.get("result", {})
+
+
+def main():
+    args = sys.argv[1:]
+    command = args[0] if args else "info"
+    if command in ("-h", "--help", "help"):
+        print(__doc__.strip())
+    elif command == "info":
+        info = call("team.info")
+        print(f"You are: {info['role']}")
+        print(f"Order:   {' -> '.join(info['flow'])}")
+        print(f"Next:    {info['next'] or '(you are last: finish with `team done`)'}")
+        print(f"Review rounds left: {info['review_rounds_left']}")
+        print(f"Branch:  {info['branch']}")
+        print(f"\nTask:\n{info['task']}")
+    elif command == "status":
+        info = call("team.status")
+        for role in info["flow"]:
+            marker = "  <- you" if role == info["role"] else ""
+            print(f"{role:<16} {info['statuses'].get(role, '?')}{marker}")
+        if info["done"]:
+            print("\nThe team has finished.")
+    elif command == "send" and len(args) >= 3:
+        text = sys.stdin.read() if args[2:] == ["-"] else " ".join(args[2:])
+        result = call("team.send", {"to": args[1], "text": text})
+        print(f"sent to {result['delivered_to']}")
+    elif command == "done":
+        call("team.done", {"summary": " ".join(args[1:])})
+        print("team marked finished; the user has been notified")
+    else:
+        sys.exit(__doc__.strip())
+
+
+if __name__ == "__main__":
+    main()

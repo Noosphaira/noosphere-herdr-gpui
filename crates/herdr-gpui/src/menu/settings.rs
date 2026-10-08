@@ -341,6 +341,7 @@ impl HerdrWindow {
             let group = match info.command {
                 Command::Workspace
                 | Command::NewWorktree
+                | Command::LaunchTeam
                 | Command::Tab
                 | Command::SplitRight
                 | Command::SplitDown

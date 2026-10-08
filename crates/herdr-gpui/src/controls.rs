@@ -6,6 +6,7 @@ pub enum Command {
     NewWindow,
     Workspace,
     NewWorktree,
+    LaunchTeam,
     Tab,
     SplitRight,
     SplitDown,
@@ -107,6 +108,12 @@ pub const COMMANDS: &[CommandInfo] = &[
         name: "new_worktree",
         label: "New Worktree",
         shortcuts: &["cmd-n"],
+    },
+    CommandInfo {
+        command: Command::LaunchTeam,
+        name: "launch_team",
+        label: "Launch Team",
+        shortcuts: &["cmd-shift-l"],
     },
     CommandInfo {
         command: Command::PreviousWorkspace,
@@ -738,6 +745,7 @@ pub fn request(command: Command, snapshot: &ClientShellSnapshot) -> Option<(Meth
         }
         Command::NewWindow
         | Command::NewWorktree
+        | Command::LaunchTeam
         | Command::Find
         | Command::CopyMode
         | Command::ToggleSidebar
