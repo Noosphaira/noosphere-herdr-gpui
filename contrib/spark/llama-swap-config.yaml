@@ -1,0 +1,14 @@
+healthCheckTimeout: 600
+models:
+  # Conversation (Hermes, chat UIs). Unchanged apart from MTP in its script.
+  "orcarouter/Qwen3.8-27B-Uncensored-NVFP4":
+    ttl: 3600
+    cmd: bash /home/sirprize/vllm-qwen38.sh
+    proxy: http://127.0.0.1:11501
+    cmdStop: docker stop vllm-qwen38
+  # Coding agents. Swap mode: asking for one model stops the other first.
+  "RedHatAI/Qwen3.6-35B-A3B-NVFP4":
+    ttl: 3600
+    cmd: bash /home/sirprize/vllm-qwen36-moe.sh
+    proxy: http://127.0.0.1:11502
+    cmdStop: docker stop vllm-qwen36-moe
