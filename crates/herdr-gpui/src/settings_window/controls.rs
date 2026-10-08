@@ -187,6 +187,22 @@ impl SettingsWindow {
         self.controls.search.update(cx, |input, cx| {
             input.set_appearance(self.config.ui.clone(), self.theme.clone(), cx);
         });
+        let inputs = &self.teams.inputs;
+        for input in [
+            &inputs.team_name,
+            &inputs.agent_name,
+            &inputs.agent_description,
+            &inputs.agent_temperature,
+            &inputs.agent_steps,
+            &inputs.access_path,
+        ] {
+            input.update(cx, |input, cx| {
+                input.set_appearance(self.config.ui.clone(), self.theme.clone(), cx);
+            });
+        }
+        inputs.agent_prompt.update(cx, |input, cx| {
+            input.set_appearance(self.config.ui.clone(), self.theme.clone(), cx);
+        });
         if let Some(editor) = &self.controls.size_editor {
             editor.input.update(cx, |input, cx| {
                 input.set_appearance(self.config.ui.clone(), self.theme.clone(), cx);
@@ -324,7 +340,7 @@ impl SettingsWindow {
         }
     }
 
-    fn control_card(&self, title: &'static str) -> Div {
+    pub(super) fn control_card(&self, title: &'static str) -> Div {
         div()
             .flex()
             .flex_col()
@@ -338,7 +354,7 @@ impl SettingsWindow {
             .child(div().font_weight(FontWeight::SEMIBOLD).child(title))
     }
 
-    fn control_note(&self, text: impl Into<SharedString>) -> Div {
+    pub(super) fn control_note(&self, text: impl Into<SharedString>) -> Div {
         div()
             .min_w_0()
             .text_color(rgb(self.theme.muted))
@@ -402,7 +418,7 @@ impl SettingsWindow {
             Section::Sound => self.render_sound_controls(cx),
             Section::Notifications => self.render_notification_controls(cx),
             Section::General => self.render_general_controls(cx),
-            Section::Appearance | Section::Integrations => div(),
+            Section::Appearance | Section::Integrations | Section::Teams => div(),
         };
         div()
             .flex()

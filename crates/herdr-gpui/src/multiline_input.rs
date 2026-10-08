@@ -16,7 +16,7 @@ use crate::fonts::StyledFont;
 use crate::search_input::{byte_range, from_utf16, to_utf16};
 use crate::{actions, input::ViewInputHandler};
 
-/// Rows shown before the field scrolls.
+/// Rows shown before the field scrolls, unless set with [`MultilineInput::set_rows`].
 const MIN_ROWS: usize = 3;
 const MAX_ROWS: usize = 8;
 
@@ -31,6 +31,8 @@ pub struct MultilineInput {
     bounds: Option<Bounds<Pixels>>,
     /// Wrapped rows in the last layout, which sizes the field.
     rows: usize,
+    /// The field grows from `visible.0` to `visible.1` rows, then scrolls.
+    visible: (usize, usize),
     scroll: Pixels,
     selecting: bool,
 }
@@ -122,6 +124,7 @@ impl MultilineInput {
             layout: Vec::new(),
             bounds: None,
             rows: 1,
+            visible: (MIN_ROWS, MAX_ROWS),
             scroll: px(0.),
             selecting: false,
         }
@@ -133,6 +136,24 @@ impl MultilineInput {
 
     pub fn set_placeholder(&mut self, value: &str, cx: &mut Context<Self>) {
         self.placeholder = value.into();
+        cx.notify();
+    }
+
+    /// Replace the whole text, with the cursor at the end.
+    pub fn set_text(&mut self, text: &str, cx: &mut Context<Self>) {
+        let text = normalize(text);
+        self.edit = Editing {
+            cursor: text.len(),
+            anchor: text.len(),
+            text,
+            marked: None,
+        };
+        self.scroll = px(0.);
+        cx.notify();
+    }
+
+    pub fn set_rows(&mut self, min: usize, max: usize, cx: &mut Context<Self>) {
+        self.visible = (min.max(1), max.max(min.max(1)));
         cx.notify();
     }
 
@@ -427,7 +448,7 @@ impl Render for MultilineInput {
         let input = cx.entity();
         let painter = input.clone();
         let height = self.line_height();
-        let visible = self.rows.clamp(MIN_ROWS, MAX_ROWS) as f32;
+        let visible = self.rows.clamp(self.visible.0, self.visible.1) as f32;
         div()
             .debug_selector(|| "multiline-input".into())
             .w_full()
@@ -492,7 +513,7 @@ impl Render for MultilineInput {
             .on_scroll_wheel(cx.listener(|this, event: &gpui::ScrollWheelEvent, _, cx| {
                 let delta = event.delta.pixel_delta(this.line_height()).y;
                 let max = (this.line_height() * this.rows as f32
-                    - this.line_height() * this.rows.clamp(MIN_ROWS, MAX_ROWS) as f32)
+                    - this.line_height() * this.rows.clamp(this.visible.0, this.visible.1) as f32)
                     .max(px(0.));
                 this.scroll = (this.scroll - delta).clamp(px(0.), max);
                 cx.notify();

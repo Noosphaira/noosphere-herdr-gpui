@@ -6,6 +6,7 @@ pub(crate) use layouts::{apply_loaded_layout, layout_load_revision};
 mod native;
 mod persistence;
 mod remote_history;
+mod teams;
 #[cfg(test)]
 use persistence::SizeIo;
 use persistence::{Loaded, SaveCompletion};
@@ -49,17 +50,19 @@ pub(super) enum Section {
     Sound,
     Notifications,
     Integrations,
+    Teams,
     General,
 }
 
 impl Section {
-    const ALL: [Self; 7] = [
+    const ALL: [Self; 8] = [
         Self::Appearance,
         Self::Fonts,
         Self::Indicators,
         Self::Sound,
         Self::Notifications,
         Self::Integrations,
+        Self::Teams,
         Self::General,
     ];
 
@@ -71,6 +74,7 @@ impl Section {
             Self::Sound => "Sound",
             Self::Notifications => "Notifications",
             Self::Integrations => "Integrations",
+            Self::Teams => "Teams",
             Self::General => "General",
         }
     }
@@ -83,6 +87,7 @@ impl Section {
             Self::Sound => "icons/chart.svg",
             Self::Notifications => "icons/bell.svg",
             Self::Integrations => "icons/agent-generic.svg",
+            Self::Teams => "icons/play.svg",
             Self::General => "icons/settings.svg",
         }
     }
@@ -95,8 +100,25 @@ impl Section {
             Self::Sound => "A little signal when something needs you.",
             Self::Notifications => "Stay informed without losing your place.",
             Self::Integrations => "Connect the agents you work with.",
+            Self::Teams => "Who works on a launched task, and what they may reach.",
             Self::General => "The small details of your daily workflow.",
         }
+    }
+}
+
+/// Open Settings on the Teams section, as the Launch team dialog's
+/// "Manage teams" does.
+pub(crate) fn open_teams(source: WeakEntity<HerdrWindow>, cx: &mut App) {
+    open(source, cx);
+    // After `open`'s own deferred work has created or raised the window.
+    cx.defer(show_teams);
+}
+
+fn show_teams(cx: &mut App) {
+    if let Some(handle) = cx.default_global::<SettingsWindowHandle>().window {
+        let _ = handle.update(cx, |view, window, cx| {
+            view.select_section(Section::Teams, window, cx);
+        });
     }
 }
 
@@ -180,6 +202,7 @@ struct SettingsWindow {
     section: Section,
     themes: themes::ThemeBrowser,
     controls: controls::Controls,
+    teams: teams::TeamsEditor,
     error: Option<String>,
     status: Option<String>,
     focus: FocusHandle,
@@ -274,6 +297,7 @@ impl SettingsWindow {
             section: Section::Appearance,
             themes: themes::ThemeBrowser::new(cx),
             controls: controls::Controls::new(cx),
+            teams: teams::TeamsEditor::new(cx),
             error: appearance.error,
             status: None,
             focus: cx.focus_handle(),
@@ -529,6 +553,9 @@ impl SettingsWindow {
         if section == Section::General {
             self.sync_remote_history(false, cx);
         }
+        if section == Section::Teams {
+            self.load_teams(cx);
+        }
         cx.notify();
     }
 
@@ -636,6 +663,7 @@ impl Render for SettingsWindow {
         let content = match self.section {
             Section::Appearance => self.render_appearance(window, cx),
             Section::Integrations => self.render_integration_controls(cx),
+            Section::Teams => self.render_teams(cx),
             _ => self.render_controls(window, cx),
         };
         self.viewport_width = f32::from(window.viewport_size().width);
