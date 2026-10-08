@@ -1,5 +1,9 @@
 # DGX Spark inference files
 
+Applied on 2026-10-08 (all three steps). Measured with `bench.py`, single
+stream, thinking off: Qwen3.8-27B 10.0 tok/s before MTP, 19.3 with it;
+Qwen3.6-35B-A3B 56.9 tok/s. Tool calls work on both.
+
 **These files belong on the DGX Spark, not on this PC.** They are kept here
 so changes to the Spark can be reviewed before they are made. `apply.sh` and
 `bench.py` are the exceptions: they run on this PC and reach the Spark over

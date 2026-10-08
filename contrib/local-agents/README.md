@@ -13,7 +13,10 @@ Install the GUI with `./install-gui.sh`: it builds this checkout and installs
 `herdr-gpui` into `~/.local/bin` with a desktop entry and icon, so app
 launchers list it as **Herdr**. Rerun it after pulling changes.
 
-Install the launcher scripts with `./install.sh`. It copies the scripts to
+Install the launcher scripts with `./install.sh`. Example role files for the
+`app-team` team are in `config/opencode-agents/`; copy them to
+`~/.config/opencode/agents/` (they are not installed automatically, so your
+own prompts are never overwritten). It copies the scripts to
 `~/.local/share/herdr-launch`, links them into `~/.local/bin`, and seeds
 `~/.config/herdr-launch/` with example configs it never overwrites:
 
