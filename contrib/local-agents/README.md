@@ -34,5 +34,27 @@ socket is bound in instead, which forwards only `pane.report_agent`,
 `pane.report_agent_session` and `pane.release_agent`, and only for the
 agent's own pane. That is all OpenCode's herdr integration sends.
 
+## Teamwork
+
+The team file's `flow` sets who works when. The launcher gives the task to the
+first role only; each role hands on with the `team` command, available inside
+its sandbox:
+
+```
+team info                    role, order, task
+team status                  each teammate's state
+team send <role> <message>   message a teammate (queued if it is busy)
+team done <summary>          finish, and notify the user
+```
+
+Messages go through the filter, which sets the sender, only reaches this
+team's panes, and caps messages back to an earlier role at `review_rounds`.
+`herdr-team-watch` (started by the launcher) reminds an agent that stops
+without handing off, and sends a desktop notification when an agent needs you
+or the team is done. Team state lives under `$XDG_RUNTIME_DIR/herdr-launch/`,
+outside every sandbox.
+
+Tests: `python3 -m unittest discover -s contrib/local-agents/tests`
+
 Known gaps: through the shared `.git` an agent can move any branch of its
 repo, and the network is open.

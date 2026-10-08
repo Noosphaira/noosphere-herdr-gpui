@@ -6,8 +6,8 @@ set -euo pipefail
 src="$(cd "$(dirname "$0")" && pwd)"
 dest="$HOME/.local/share/herdr-launch"
 mkdir -p "$dest" "$HOME/.local/bin" "$HOME/.config/herdr-launch/teams"
-install -m 0755 "$src/herdr-sandbox" "$src/herdr-launch" "$dest/"
-install -m 0644 "$src/herdr_grants.py" "$dest/"
+install -m 0755 "$src/herdr-sandbox" "$src/herdr-launch" "$src/herdr-team-watch" "$src/team" "$dest/"
+install -m 0644 "$src/herdr_grants.py" "$src/herdr_filter.py" "$src/herdr_team.py" "$dest/"
 ln -sf "$dest/herdr-sandbox" "$HOME/.local/bin/herdr-sandbox"
 ln -sf "$dest/herdr-launch" "$HOME/.local/bin/herdr-launch"
 for f in global.yaml repos.yaml teams/app-team.yaml; do

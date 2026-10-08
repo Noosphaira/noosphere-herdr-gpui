@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Run one command inside bubblewrap, confined to a git worktree.
 
-Usage: herdr-sandbox <worktree> -- <command> [args...]
+Usage: herdr-sandbox [--team-dir DIR --role ROLE] <worktree> -- <command> [args...]
 
 Binds the worktree and its repo's common .git read-write (hooks read-only),
 OpenCode's config read-only and its data directories read-write, and the
@@ -10,30 +10,25 @@ directory is an empty tmpfs.
 
 herdr's control socket is never bound in. Anything that can write to it can
 run commands in any pane, outside the sandbox. Instead, a filter socket is
-bound in that forwards only the agent-state reports OpenCode's herdr
-integration sends, and only for this pane.
+bound in (see herdr_filter.py): it forwards this pane's agent-state reports
+and, for a launched team, the `team` command's messages to teammates.
 """
 
-import json
 import os
 import shutil
 import signal
-import socket
 import subprocess
 import sys
 import tempfile
-import threading
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+import herdr_filter  # noqa: E402
 import herdr_grants  # noqa: E402
 
-HOME = Path.home()
+LAUNCH_DIR = Path(__file__).resolve().parent
 
-# Socket methods OpenCode's herdr integration uses. Both only describe the
-# calling pane's own agent.
-ALLOWED_METHODS = {"pane.report_agent", "pane.report_agent_session", "pane.release_agent"}
-MAX_REQUEST = 64 * 1024
+HOME = Path.home()
 
 ETC_FILES = [
     "passwd", "group", "hosts", "nsswitch.conf", "localtime", "ld.so.cache",
@@ -47,6 +42,8 @@ ENV_PASSTHROUGH = [
 ]
 
 SANDBOX_SOCKET_DIR = "/run/herdr-filter"
+# The `team` command, bound read-only with the module it needs.
+SANDBOX_TEAM_DIR = "/run/herdr-team"
 
 # OpenCode's own outbound calls, all off: update checks, conversation
 # sharing, the models.dev catalog, language-server and plugin downloads.
@@ -72,90 +69,13 @@ def git(*args, cwd):
     return result.stdout.strip()
 
 
-# --- herdr socket filter -----------------------------------------------------
-
-def reply(conn, request_id, code, message):
-    body = {"id": request_id, "error": {"code": code, "message": message}}
-    conn.sendall((json.dumps(body) + "\n").encode())
-
-
-def forward(line, upstream_path):
-    with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as up:
-        up.settimeout(5)
-        up.connect(upstream_path)
-        up.sendall(line)
-        data = b""
-        while not data.endswith(b"\n") and len(data) < MAX_REQUEST:
-            chunk = up.recv(4096)
-            if not chunk:
-                break
-            data += chunk
-        return data
-
-
-def serve_filter_client(conn, upstream_path, pane_id):
-    with conn:
-        conn.settimeout(10)
-        buffer = b""
-        while True:
-            try:
-                chunk = conn.recv(4096)
-            except OSError:
-                return
-            if not chunk:
-                return
-            buffer += chunk
-            if len(buffer) > MAX_REQUEST:
-                return
-            while b"\n" in buffer:
-                line, buffer = buffer.split(b"\n", 1)
-                try:
-                    request = json.loads(line)
-                    request_id = request.get("id")
-                    method = request.get("method")
-                    params = request.get("params") or {}
-                except (ValueError, AttributeError):
-                    reply(conn, None, "invalid_request", "not a JSON object")
-                    continue
-                if method not in ALLOWED_METHODS:
-                    reply(conn, request_id, "forbidden", f"{method} is not allowed from the sandbox")
-                    continue
-                if params.get("pane_id") != pane_id:
-                    reply(conn, request_id, "forbidden", "agents may only report their own pane")
-                    continue
-                try:
-                    conn.sendall(forward(line + b"\n", upstream_path) or b"")
-                except OSError as error:
-                    reply(conn, request_id, "unavailable", str(error))
-
-
-def start_filter(upstream_path, pane_id, directory):
-    path = os.path.join(directory, "herdr.sock")
-    server = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
-    server.bind(path)
-    server.listen(8)
-
-    def accept_loop():
-        while True:
-            try:
-                conn, _ = server.accept()
-            except OSError:
-                return
-            threading.Thread(
-                target=serve_filter_client, args=(conn, upstream_path, pane_id), daemon=True
-            ).start()
-
-    threading.Thread(target=accept_loop, daemon=True).start()
-    return server
-
-
 # --- bubblewrap command ------------------------------------------------------
 
 def bind_args(flag, source, target=None):
     return [flag, str(source), str(target or source)]
 
 
-def build_bwrap(worktree, common_git, grants, command, filter_dir):
+def build_bwrap(worktree, common_git, grants, command, filter_dir, role=None):
     args = [
         "bwrap",
         "--die-with-parent",
@@ -202,12 +122,17 @@ def build_bwrap(worktree, common_git, grants, command, filter_dir):
 
     if filter_dir:
         args += bind_args("--ro-bind", filter_dir, SANDBOX_SOCKET_DIR)
+    if role:
+        args += bind_args("--ro-bind", LAUNCH_DIR / "team", f"{SANDBOX_TEAM_DIR}/team")
 
     args += ["--clearenv"]
     for name in ENV_PASSTHROUGH + grants["env"]:
         if name in os.environ:
             args += ["--setenv", name, os.environ[name]]
     path_dirs = [str(executable.parent)] + grants["path"] + ["/usr/local/bin", "/usr/bin"]
+    if role:
+        path_dirs.insert(0, SANDBOX_TEAM_DIR)
+        args += ["--setenv", "HERDR_TEAM_ROLE", role]
     args += ["--setenv", "HOME", str(HOME), "--setenv", "PATH", ":".join(path_dirs)]
     args += ["--setenv", "HERDR_SANDBOX", "1"]
     for name, value in OPENCODE_OFFLINE.items():
@@ -218,12 +143,25 @@ def build_bwrap(worktree, common_git, grants, command, filter_dir):
     return args
 
 
-def main():
-    argv = sys.argv[1:]
+def parse_args(argv):
+    team_dir = role = None
+    while argv and argv[0] in ("--team-dir", "--role"):
+        if len(argv) < 2:
+            die(f"{argv[0]} needs a value")
+        if argv[0] == "--team-dir":
+            team_dir = argv[1]
+        else:
+            role = argv[1]
+        argv = argv[2:]
+    if bool(team_dir) != bool(role):
+        die("--team-dir and --role go together")
     if "--" not in argv or argv.index("--") != 1 or len(argv) < 3:
-        die("usage: herdr-sandbox <worktree> -- <command> [args...]")
-    worktree = Path(argv[0]).expanduser().resolve()
-    command = argv[2:]
+        die("usage: herdr-sandbox [--team-dir DIR --role ROLE] <worktree> -- <command> [args...]")
+    return team_dir, role, Path(argv[0]).expanduser().resolve(), argv[2:]
+
+
+def main():
+    team_dir, role, worktree, command = parse_args(sys.argv[1:])
     if not worktree.is_dir():
         die(f"not a directory: {worktree}")
 
@@ -246,9 +184,11 @@ def main():
     if upstream and pane_id:
         runtime = os.environ.get("XDG_RUNTIME_DIR") or tempfile.gettempdir()
         filter_dir = tempfile.mkdtemp(prefix="herdr-sandbox-", dir=runtime)
-        server = start_filter(upstream, pane_id, filter_dir)
+        server = herdr_filter.Filter(upstream, pane_id, team_dir, role).start(filter_dir)
+    elif role:
+        die("a team member needs herdr's socket and pane; run it in a herdr pane")
 
-    child = subprocess.Popen(build_bwrap(worktree, common_git, grants, command, filter_dir))
+    child = subprocess.Popen(build_bwrap(worktree, common_git, grants, command, filter_dir, role))
     # The terminal delivers Ctrl-C and friends to the whole foreground group,
     # so the child sees them directly. Ignore them here and wait for it.
     for sig in (signal.SIGINT, signal.SIGQUIT, signal.SIGTSTP):

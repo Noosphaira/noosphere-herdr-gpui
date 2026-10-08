@@ -7,8 +7,16 @@ Usage:
                [--base <ref>] [--session <name>] [--json]
 
 Creates the worktree through herdr, opens one pane per role, starts
-`opencode --agent <role>` in each pane through herdr-sandbox, waits until
-herdr sees each agent ready, then submits the task to every agent.
+`opencode --agent <role>` in each pane through herdr-sandbox as a team member,
+waits until herdr sees each agent ready, then gives the task to the first role
+of the team's `flow`. Roles hand work on with the `team` command; a watcher
+(herdr-team-watch) reminds an agent that stops without handing off and
+notifies the user when someone needs them or the team is done.
+
+Team file (~/.config/herdr-launch/teams/<team>.yaml):
+  roles: [ui-designer, coder, reviewer]   # one pane each, left to right
+  flow: [ui-designer, coder, reviewer]    # who works when (default: roles)
+  review_rounds: 2                        # messages back to an earlier role
 
 Progress goes to stderr as "step <n>/<total>: <text>". On failure nothing is
 cleaned up; the failing step and its output are reported (as JSON with --json).
@@ -24,10 +32,12 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import herdr_grants  # noqa: E402
+import herdr_team  # noqa: E402
 
 TEAMS_DIR = herdr_grants.CONFIG_DIR / "teams"
 AGENTS_DIR = Path.home() / ".config/opencode/agents"
 SANDBOX = Path(__file__).resolve().parent / "herdr-sandbox"
+WATCHER = Path(__file__).resolve().parent / "herdr-team-watch"
 STEPS = 6
 # Below the GUI's 60 s script idle limit; agents are ready in about a second.
 AGENT_READY_TIMEOUT_MS = 45_000
@@ -89,6 +99,14 @@ class Launcher:
         if missing:
             raise StepError("validate", f"no OpenCode agent file for: {', '.join(missing)} in {AGENTS_DIR}")
         self.roles = roles
+        flow = team.get("flow", roles)
+        if not isinstance(flow, list) or sorted(flow) != sorted(roles):
+            raise StepError("validate", f"{team_file}: flow must list each role exactly once")
+        self.flow = flow
+        rounds = team.get("review_rounds", 2)
+        if not isinstance(rounds, int) or not 0 <= rounds <= 10:
+            raise StepError("validate", f"{team_file}: review_rounds must be a number from 0 to 10")
+        self.review_rounds = rounds
 
         # Any path inside the repo works, including its .git directory (what
         # the GUI knows) or a linked worktree: agents always branch from the
@@ -144,8 +162,15 @@ class Launcher:
 
     def start_agents(self):
         self.progress(4, "start", "starting sandboxed agents")
+        self.team_dir = herdr_team.create(
+            self.workspace_id, self.args.branch, self.args.task.strip(), self.flow,
+            self.panes, self.review_rounds,
+        )
         for role, pane in self.panes.items():
-            command = [str(SANDBOX), self.worktree, "--", "opencode", "--agent", role]
+            command = [
+                str(SANDBOX), "--team-dir", str(self.team_dir), "--role", role,
+                self.worktree, "--", "opencode", "--agent", role,
+            ]
             self.herdr("pane", "run", pane, shlex.join(command))
 
     def wait_ready(self):
@@ -164,9 +189,18 @@ class Launcher:
                 time.sleep(0.5)
 
     def deliver_task(self):
-        self.progress(6, "prompt", "sending the task to every agent")
-        for pane in self.panes.values():
-            self.herdr("agent", "prompt", pane, self.args.task)
+        first = self.flow[0]
+        self.progress(6, "prompt", f"giving the task to {first} and starting the watcher")
+        after = self.flow[1] if len(self.flow) > 1 else None
+        handoff = (
+            f'When your part is done, hand off with: team send {after} "<what you did and where>"'
+            if after
+            else 'When you are done, finish with: team done "<summary>"'
+        )
+        self.herdr("agent", "prompt", self.panes[first], f"{self.args.task.strip()}\n\n[team] You go first. {handoff}")
+        watch = [str(WATCHER), str(self.team_dir)] + (["--session", self.args.session] if self.args.session else [])
+        with open(self.team_dir / "watch.log", "a") as log:
+            subprocess.Popen(watch, stdin=subprocess.DEVNULL, stdout=log, stderr=log, start_new_session=True)
 
     def pane_tail(self, pane):
         command = ["herdr"] + (["--session", self.args.session] if self.args.session else [])
@@ -186,6 +220,8 @@ class Launcher:
             "worktree": self.worktree,
             "branch": self.args.branch,
             "panes": self.panes,
+            "flow": self.flow,
+            "team_dir": str(self.team_dir),
         }
 
 

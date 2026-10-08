@@ -1,0 +1,112 @@
+#!/usr/bin/env python3
+"""Keep a launched team moving. Started by herdr-launch, one per team.
+
+Usage: herdr-team-watch <team-dir> [--session NAME]
+
+Every few seconds it looks at the role whose turn it is:
+
+- idle without having handed off: after a grace period it reminds that agent
+  once to hand off (or to say it needs the user); if it stays idle after
+  that, it notifies the user;
+- blocked on an approval: it notifies the user;
+- `team done` run, or every agent gone: it exits.
+
+It never hands work on by itself: only an agent decides its part is done.
+"""
+
+import json
+import subprocess
+import sys
+import time
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import herdr_team  # noqa: E402
+
+POLL = 15
+GRACE = 90
+BLOCKED_GRACE = 30
+LIFETIME = 24 * 3600
+
+
+def herdr(session, *args):
+    command = ["herdr"] + (["--session", session] if session else []) + list(args)
+    result = subprocess.run(command, capture_output=True, text=True, timeout=30)
+    try:
+        return json.loads(result.stdout).get("result") if result.returncode == 0 else None
+    except ValueError:
+        return None
+
+
+def status(session, pane):
+    result = herdr(session, "agent", "get", pane)
+    if not result:
+        return "gone"
+    agent = result.get("agent") or result.get("pane") or {}
+    return agent.get("agent_status", "unknown")
+
+
+def main():
+    args = sys.argv[1:]
+    if not args:
+        sys.exit(__doc__.strip())
+    team_dir = Path(args[0])
+    session = args[2] if args[1:2] == ["--session"] and len(args) > 2 else None
+    team = herdr_team.load(team_dir)
+    branch = team["branch"]
+    started = time.monotonic()
+
+    # What has been seen since the active role last changed.
+    marker = None
+    worked = nudged = told_user = told_blocked = False
+    idle_since = blocked_since = None
+
+    while time.monotonic() - started < LIFETIME:
+        current = herdr_team.read_state(team_dir)
+        if current["done"]:
+            return
+        statuses = {role: status(session, pane) for role, pane in team["members"].items()}
+        if all(value == "gone" for value in statuses.values()):
+            return
+
+        active = current["active"]
+        now_marker = (active, len(current["log"]))
+        if now_marker != marker:
+            marker = now_marker
+            worked = nudged = told_user = told_blocked = False
+            idle_since = blocked_since = None
+
+        state = statuses.get(active, "gone")
+        now = time.monotonic()
+        if state == "working":
+            worked = True
+            idle_since = blocked_since = None
+        elif state == "blocked":
+            blocked_since = blocked_since or now
+            if not told_blocked and now - blocked_since >= BLOCKED_GRACE:
+                herdr_team.notify(f"Team {branch}: {active} needs you", "It is waiting for your approval.", urgent=True)
+                told_blocked = True
+        elif state in ("idle", "done") and worked:
+            idle_since = idle_since or now
+            if now - idle_since >= GRACE:
+                flow = team["flow"]
+                index = flow.index(active)
+                follow = (
+                    f"`team send {flow[index + 1]} \"<what you did and where>\"`"
+                    if index + 1 < len(flow)
+                    else "`team done \"<summary>\"`"
+                )
+                if not nudged:
+                    herdr(session, "agent", "prompt", team["members"][active],
+                          "[team reminder] You stopped without handing off. If your part is finished, "
+                          f"run {follow}. If you need the user, say so in one line and stop.")
+                    nudged, idle_since = True, None
+                elif not told_user:
+                    herdr_team.notify(f"Team {branch}: {active} stopped",
+                                      "It went idle without handing off. Check its pane.", urgent=True)
+                    told_user = True
+        time.sleep(POLL)
+
+
+if __name__ == "__main__":
+    main()
