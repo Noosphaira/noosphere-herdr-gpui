@@ -34,6 +34,24 @@ socket is bound in instead, which forwards only `pane.report_agent`,
 `pane.report_agent_session` and `pane.release_agent`, and only for the
 agent's own pane. That is all OpenCode's herdr integration sends.
 
+## Editing teams, agents and folder access
+
+Herdr's **Settings → Teams** edits all of this; the **Manage teams...** link in
+the Launch team dialog opens it. The GUI never writes these files itself:
+`herdr-teams` (installed with the scripts) loads them as JSON and applies one
+change at a time, validating the whole result with the same rules
+`herdr-launch` uses before writing anything, and replacing files atomically.
+
+```
+herdr-teams load                    # everything, as JSON
+echo '<change>' | herdr-teams apply # save_team, delete_team, save_agent,
+                                    # delete_agent or save_access
+```
+
+Unknown keys in team and agent files are kept; YAML comments are not.
+Renaming an agent updates every team that uses it; deleting one that a team
+uses is refused.
+
 ## Teamwork
 
 The team file's `flow` sets who works when. The launcher gives the task to the
@@ -54,7 +72,8 @@ without handing off, and sends a desktop notification when an agent needs you
 or the team is done. Team state lives under `$XDG_RUNTIME_DIR/herdr-launch/`,
 outside every sandbox.
 
-Tests: `python3 -m unittest discover -s contrib/local-agents/tests`
+Tests (filter rules and herdr-teams, against a throwaway home):
+`python3 -m unittest discover -s contrib/local-agents/tests`
 
 Known gaps: through the shared `.git` an agent can move any branch of its
 repo, and the network is open.
