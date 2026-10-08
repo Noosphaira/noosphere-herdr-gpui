@@ -1,32 +1,40 @@
-//! A single-line, native-IME-aware input for searchable pickers.
+//! A wrapping, multi-line, native-IME-aware text field for longer prose such
+//! as a task description. Shift-Enter starts a new line; plain Enter, Escape,
+//! and Tab are left to the surrounding dialog, as in [`SearchInput`].
+//!
+//! [`SearchInput`]: crate::search_input::SearchInput
 use std::ops::Range;
 
 use gpui::{
-    App, Bounds, ClipboardItem, ContentMask, Context, CursorStyle, EntityInputHandler,
-    EventEmitter, FocusHandle, Focusable, KeyDownEvent, MouseButton, Pixels, Point, ShapedLine,
-    TextAlign, TextRun, UTF16Selection, UnderlineStyle, Window, canvas, div, fill, point,
-    prelude::*, px, rgb, size,
+    App, Bounds, ClipboardItem, ContentMask, Context, CursorStyle, EntityInputHandler, FocusHandle,
+    Focusable, KeyDownEvent, MouseButton, Pixels, Point, TextAlign, TextRun, UTF16Selection,
+    UnderlineStyle, Window, WrappedLine, canvas, div, fill, point, prelude::*, px, rgb, size,
 };
 
 use crate::config::{Config, FontConfig, Theme};
 use crate::fonts::StyledFont;
+use crate::search_input::{byte_range, from_utf16, to_utf16};
 use crate::{actions, input::ViewInputHandler};
 
-pub struct Changed;
+/// Rows shown before the field scrolls.
+const MIN_ROWS: usize = 3;
+const MAX_ROWS: usize = 8;
 
-pub struct SearchInput {
+pub struct MultilineInput {
     pub focus: FocusHandle,
     placeholder: String,
     edit: Editing,
     font: FontConfig,
     theme: Theme,
-    layout: Option<ShapedLine>,
+    /// One shaped paragraph per `\n`-separated line, with its byte start.
+    layout: Vec<(usize, WrappedLine)>,
     bounds: Option<Bounds<Pixels>>,
+    /// Wrapped rows in the last layout, which sizes the field.
+    rows: usize,
     scroll: Pixels,
     selecting: bool,
 }
 
-// Internal offsets are UTF-8 boundaries; only the platform input API uses UTF-16.
 #[derive(Default)]
 struct Editing {
     text: String,
@@ -35,30 +43,9 @@ struct Editing {
     marked: Option<Range<usize>>,
 }
 
-pub(crate) fn from_utf16(text: &str, offset: usize) -> usize {
-    let mut units = 0;
-    for (byte, ch) in text.char_indices() {
-        if units >= offset {
-            return byte;
-        }
-        units += ch.len_utf16();
-    }
-    text.len()
-}
-
-pub(crate) fn to_utf16(text: &str, offset: usize) -> usize {
-    text[..offset].encode_utf16().count()
-}
-
-pub(crate) fn byte_range(text: &str, range: Range<usize>) -> Range<usize> {
-    // Clamp out-of-bounds requests and round split surrogate pairs forward.
-    from_utf16(text, range.start.min(range.end))..from_utf16(text, range.start.max(range.end))
-}
-
-fn single_line(text: &str) -> String {
-    text.chars()
-        .filter(|ch| !matches!(ch, '\r' | '\n'))
-        .collect()
+/// Carriage returns are dropped so `\n` is the only line break.
+fn normalize(text: &str) -> String {
+    text.replace("\r\n", "\n").replace('\r', "\n")
 }
 
 impl Editing {
@@ -73,7 +60,6 @@ impl Editing {
         }
     }
 
-    // Scalar boundaries keep this small input dependency-free and never split UTF-8.
     fn previous(&self) -> usize {
         self.text[..self.cursor]
             .char_indices()
@@ -88,6 +74,16 @@ impl Editing {
             .map_or(self.cursor, |ch| self.cursor + ch.len_utf8())
     }
 
+    fn line_start(&self) -> usize {
+        self.text[..self.cursor].rfind('\n').map_or(0, |i| i + 1)
+    }
+
+    fn line_end(&self) -> usize {
+        self.text[self.cursor..]
+            .find('\n')
+            .map_or(self.text.len(), |i| self.cursor + i)
+    }
+
     fn replace(
         &mut self,
         range: Option<Range<usize>>,
@@ -99,7 +95,7 @@ impl Editing {
             .map(|r| byte_range(&self.text, r))
             .or_else(|| self.marked.clone())
             .unwrap_or_else(|| self.selection());
-        let inserted = single_line(text);
+        let inserted = normalize(text);
         let changed = self.text[range.clone()] != inserted;
         self.text.replace_range(range.clone(), &inserted);
         self.marked = (composing && !inserted.is_empty())
@@ -107,26 +103,25 @@ impl Editing {
         self.cursor = range.start + inserted.len();
         self.anchor = self.cursor;
         if composing && let Some(selection) = selection {
-            // IME selection is relative to the supplied text, not the whole buffer.
-            // Map through newline removal as well as UTF-16 conversion.
-            self.anchor =
-                range.start + single_line(&text[..from_utf16(text, selection.start)]).len();
-            self.cursor = range.start + single_line(&text[..from_utf16(text, selection.end)]).len();
+            // IME selection is relative to the supplied text, not the buffer.
+            self.anchor = range.start + normalize(&text[..from_utf16(text, selection.start)]).len();
+            self.cursor = range.start + normalize(&text[..from_utf16(text, selection.end)]).len();
         }
         changed
     }
 }
 
-impl SearchInput {
+impl MultilineInput {
     pub fn new(cx: &mut Context<Self>) -> Self {
         Self {
             focus: cx.focus_handle(),
-            placeholder: "Search themes...".into(),
+            placeholder: String::new(),
             edit: Editing::default(),
             font: Config::default().ui,
             theme: Theme::default(),
-            layout: None,
+            layout: Vec::new(),
             bounds: None,
+            rows: 1,
             scroll: px(0.),
             selecting: false,
         }
@@ -136,22 +131,8 @@ impl SearchInput {
         &self.edit.text
     }
 
-    pub(super) fn set_text_selected(&mut self, text: &str, cx: &mut Context<Self>) {
-        let text = single_line(text);
-        let changed = self.edit.text != text;
-        self.edit = Editing {
-            cursor: text.len(),
-            text,
-            ..Editing::default()
-        };
-        self.scroll = px(0.);
-        self.selecting = false;
-        self.did_edit(changed, cx);
-    }
-
     pub fn set_placeholder(&mut self, value: &str, cx: &mut Context<Self>) {
         self.placeholder = value.into();
-        self.layout = None;
         cx.notify();
     }
 
@@ -159,70 +140,123 @@ impl SearchInput {
         self.edit.marked.is_some()
     }
 
-    pub fn clear(&mut self, cx: &mut Context<Self>) {
-        let changed = !self.edit.text.is_empty();
-        self.edit = Editing::default();
-        self.scroll = px(0.);
-        self.selecting = false;
-        self.did_edit(changed, cx);
-    }
-
     pub fn set_appearance(&mut self, font: FontConfig, theme: Theme, cx: &mut Context<Self>) {
         self.font = font;
         self.theme = theme;
-        self.layout = None;
         cx.notify();
     }
 
-    fn did_edit(&mut self, changed: bool, cx: &mut Context<Self>) {
-        self.layout = None;
-        if changed {
-            cx.emit(Changed);
+    fn line_height(&self) -> Pixels {
+        px(self.font.line_height())
+    }
+
+    /// Where `offset` sits, relative to the text's top-left corner.
+    fn position(&self, offset: usize) -> Point<Pixels> {
+        if self.edit.text.is_empty() {
+            return Point::default();
         }
-        cx.notify();
+        let height = self.line_height();
+        let mut top = px(0.);
+        for (start, line) in &self.layout {
+            if offset <= start + line.len() {
+                let local = line
+                    .position_for_index(offset - start, height)
+                    .unwrap_or_default();
+                return point(local.x, top + local.y);
+            }
+            top += line.size(height).height;
+        }
+        point(px(0.), top)
+    }
+
+    /// The text offset closest to `position`, relative to the text's corner.
+    fn index_at(&self, position: Point<Pixels>) -> usize {
+        if self.edit.text.is_empty() {
+            return 0;
+        }
+        let height = self.line_height();
+        let mut top = px(0.);
+        for (index, (start, line)) in self.layout.iter().enumerate() {
+            let bottom = top + line.size(height).height;
+            if position.y < bottom || index + 1 == self.layout.len() {
+                let local = point(
+                    position.x,
+                    (position.y - top).max(px(0.)).min(bottom - top - px(1.)),
+                );
+                let offset = line
+                    .closest_index_for_position(local, height)
+                    .unwrap_or_else(|end| end);
+                return start + offset.min(line.len());
+            }
+            top = bottom;
+        }
+        0
     }
 
     fn mouse_index(&self, position: Point<Pixels>) -> usize {
-        match (&self.layout, self.bounds) {
-            (Some(line), Some(bounds)) if !self.edit.text.is_empty() => {
-                line.closest_index_for_x(position.x - bounds.left() + self.scroll)
-            }
+        match self.bounds {
+            Some(bounds) if !self.edit.text.is_empty() => self.index_at(point(
+                position.x - bounds.left(),
+                position.y - bounds.top() + self.scroll,
+            )),
             _ => 0,
         }
     }
 
+    /// Up or down one visual row from the cursor, keeping its column.
+    fn vertical(&self, rows: f32) -> usize {
+        let at = self.position(self.edit.cursor);
+        let target = at.y + self.line_height() * rows;
+        if target < px(0.) {
+            return 0;
+        }
+        let total = self.line_height() * self.rows as f32;
+        if target >= total {
+            return self.edit.text.len();
+        }
+        self.index_at(point(at.x, target + self.line_height() / 2.))
+    }
+
+    fn did_edit(&mut self, cx: &mut Context<Self>) {
+        cx.notify();
+    }
+
+    /// Edits from this field's own keys: Shift-Enter, deletion, and paste.
+    fn insert(&mut self, text: &str, cx: &mut Context<Self>) {
+        self.edit.replace(None, text, false, None);
+        self.did_edit(cx);
+    }
+
     fn key_down(&mut self, event: &KeyDownEvent, window: &mut Window, cx: &mut Context<Self>) {
-        // Let the OS consume composition keys, including picker navigation/accept/dismiss.
         if self.is_composing() {
             return;
         }
         let key = event.keystroke.key.as_str();
         let modifiers = event.keystroke.modifiers;
-        if matches!(key, "up" | "down" | "enter" | "escape") {
+        if key == "enter" && modifiers.shift && !modifiers.platform && !modifiers.control {
+            self.insert("\n", cx);
+        } else if matches!(key, "enter" | "escape" | "tab") {
             return;
-        }
-        if modifiers.platform && !modifiers.control && !modifiers.alt {
+        } else if modifiers.platform && !modifiers.control && !modifiers.alt {
             match key {
-                // As in every macOS text field: Cmd-Left and Cmd-Right go to
-                // the line's ends, Cmd-Backspace and Cmd-Delete delete to them.
                 "left" | "right" => {
                     let offset = if key == "left" {
-                        0
+                        self.edit.line_start()
                     } else {
-                        self.edit.text.len()
+                        self.edit.line_end()
                     };
                     self.edit.select_to(offset, modifiers.shift);
                 }
-                "backspace" | "delete" if !modifiers.shift => {
+                "up" | "down" => {
+                    let offset = if key == "up" { 0 } else { self.edit.text.len() };
+                    self.edit.select_to(offset, modifiers.shift);
+                }
+                "backspace" if !modifiers.shift => {
                     if self.edit.selection().is_empty() {
-                        let offset = if key == "backspace" {
-                            0
-                        } else {
-                            self.edit.text.len()
-                        };
-                        self.edit.select_to(offset, true);
+                        let start = self.edit.line_start();
+                        self.edit.select_to(start, true);
                     }
-                    self.replace_text_in_range(None, "", window, cx);
+                    self.insert("", cx);
                 }
                 _ if modifiers.shift => return,
                 "a" => {
@@ -236,13 +270,13 @@ impl SearchInput {
                             self.edit.text[selection].into(),
                         ));
                         if key == "x" {
-                            self.replace_text_in_range(None, "", window, cx);
+                            self.insert("", cx);
                         }
                     }
                 }
                 "v" => {
                     if let Some(text) = cx.read_from_clipboard().and_then(|item| item.text()) {
-                        self.replace_text_in_range(None, &text, window, cx);
+                        self.insert(&text, cx);
                     }
                 }
                 _ => return,
@@ -258,13 +292,15 @@ impl SearchInput {
                         };
                         self.edit.select_to(offset, true);
                     }
-                    self.replace_text_in_range(None, "", window, cx);
+                    self.insert("", cx);
                 }
-                "left" | "right" | "home" | "end" => {
+                "left" | "right" | "home" | "end" | "up" | "down" => {
                     let selection = self.edit.selection();
                     let offset = match key {
-                        "home" => 0,
-                        "end" => self.edit.text.len(),
+                        "home" => self.edit.line_start(),
+                        "end" => self.edit.line_end(),
+                        "up" => self.vertical(-1.),
+                        "down" => self.vertical(1.),
                         "left" if !modifiers.shift && !selection.is_empty() => selection.start,
                         "right" if !modifiers.shift && !selection.is_empty() => selection.end,
                         "left" => self.edit.previous(),
@@ -275,7 +311,6 @@ impl SearchInput {
                 _ => return,
             }
         } else {
-            // Option/dead-key text also goes through the native input handler.
             return;
         }
         cx.stop_propagation();
@@ -284,15 +319,13 @@ impl SearchInput {
     }
 }
 
-impl EventEmitter<Changed> for SearchInput {}
-
-impl Focusable for SearchInput {
+impl Focusable for MultilineInput {
     fn focus_handle(&self, _: &App) -> FocusHandle {
         self.focus.clone()
     }
 }
 
-impl EntityInputHandler for SearchInput {
+impl EntityInputHandler for MultilineInput {
     fn text_for_range(
         &mut self,
         range: Range<usize>,
@@ -337,8 +370,13 @@ impl EntityInputHandler for SearchInput {
         _: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let changed = self.edit.replace(range, text, false, None);
-        self.did_edit(changed, cx);
+        // Typed text: plain Enter arrives here as a line break, but Enter
+        // belongs to the dialog; only Shift-Enter starts a new line.
+        if matches!(text, "\n" | "\r" | "\r\n") {
+            return;
+        }
+        self.edit.replace(range, text, false, None);
+        self.did_edit(cx);
     }
 
     fn replace_and_mark_text_in_range(
@@ -349,8 +387,8 @@ impl EntityInputHandler for SearchInput {
         _: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let changed = self.edit.replace(range, text, true, selection);
-        self.did_edit(changed, cx);
+        self.edit.replace(range, text, true, selection);
+        self.did_edit(cx);
     }
 
     fn bounds_for_range(
@@ -360,18 +398,14 @@ impl EntityInputHandler for SearchInput {
         _: &mut Window,
         _: &mut Context<Self>,
     ) -> Option<Bounds<Pixels>> {
-        let line = self.layout.as_ref()?;
         let bounds = self.bounds?;
         let range = byte_range(self.text(), range);
-        let x = |index| {
-            (bounds.left() + line.x_for_index(index) - self.scroll)
-                .max(bounds.left())
-                .min(bounds.right())
-        };
-        Some(Bounds::from_corners(
-            point(x(range.start), bounds.top()),
-            point(x(range.end), bounds.bottom()),
-        ))
+        let start = self.position(range.start);
+        let origin = point(
+            bounds.left() + start.x,
+            bounds.top() + start.y - self.scroll,
+        );
+        Some(Bounds::new(origin, size(px(1.), self.line_height())))
     }
 
     fn character_index_for_point(
@@ -381,21 +415,21 @@ impl EntityInputHandler for SearchInput {
         _: &mut Context<Self>,
     ) -> Option<usize> {
         let bounds = self.bounds?;
-        if position.y < bounds.top() || position.y > bounds.bottom() {
+        if !bounds.contains(&position) {
             return None;
         }
-        self.layout.as_ref()?;
         Some(to_utf16(self.text(), self.mouse_index(position)))
     }
 }
 
-impl Render for SearchInput {
+impl Render for MultilineInput {
     fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let input = cx.entity();
         let painter = input.clone();
-        let height = px(self.font.line_height());
+        let height = self.line_height();
+        let visible = self.rows.clamp(MIN_ROWS, MAX_ROWS) as f32;
         div()
-            .debug_selector(|| "theme-search".into())
+            .debug_selector(|| "multiline-input".into())
             .w_full()
             .px_2()
             .py_1()
@@ -430,10 +464,6 @@ impl Render for SearchInput {
                     if !this.is_composing() {
                         let offset = this.mouse_index(event.position);
                         this.edit.select_to(offset, event.modifiers.shift);
-                        if event.click_count >= 2 {
-                            this.edit.anchor = 0;
-                            this.edit.cursor = this.edit.text.len();
-                        }
                         this.selecting = true;
                     }
                     cx.notify();
@@ -459,9 +489,17 @@ impl Render for SearchInput {
                 MouseButton::Left,
                 cx.listener(|this, _, _, _| this.selecting = false),
             )
+            .on_scroll_wheel(cx.listener(|this, event: &gpui::ScrollWheelEvent, _, cx| {
+                let delta = event.delta.pixel_delta(this.line_height()).y;
+                let max = (this.line_height() * this.rows as f32
+                    - this.line_height() * this.rows.clamp(MIN_ROWS, MAX_ROWS) as f32)
+                    .max(px(0.));
+                this.scroll = (this.scroll - delta).clamp(px(0.), max);
+                cx.notify();
+            }))
             .child(
                 canvas(
-                    move |_, window, cx| {
+                    move |bounds, window, cx| {
                         let input = input.read(cx);
                         let placeholder = input.text().is_empty();
                         let text: gpui::SharedString = if placeholder {
@@ -482,8 +520,8 @@ impl Render for SearchInput {
                             underline: None,
                             strikethrough: None,
                         };
-                        let runs = if let Some(marked) = &input.edit.marked {
-                            vec![
+                        let runs: Vec<TextRun> = match &input.edit.marked {
+                            Some(marked) if !placeholder => [
                                 TextRun {
                                     len: marked.start,
                                     ..run.clone()
@@ -504,172 +542,113 @@ impl Render for SearchInput {
                             ]
                             .into_iter()
                             .filter(|run| run.len > 0)
-                            .collect()
-                        } else {
-                            vec![run]
+                            .collect(),
+                            _ => vec![run],
                         };
-                        window
+                        let lines = window
                             .text_system()
-                            .shape_line(text, px(input.font.size), &runs, None)
+                            .shape_text(
+                                text.clone(),
+                                px(input.font.size),
+                                &runs,
+                                Some(bounds.size.width.max(px(1.))),
+                                None,
+                            )
+                            .unwrap_or_default();
+                        // shape_text splits at `\n`; record where each paragraph starts.
+                        let mut start = 0;
+                        lines
+                            .into_iter()
+                            .map(|line| {
+                                let entry = (start, line);
+                                start += entry.1.len() + 1;
+                                entry
+                            })
+                            .collect::<Vec<_>>()
                     },
-                    move |bounds, line, window, cx| {
+                    move |bounds, lines, window, cx| {
                         painter.update(cx, |input, cx| {
-                            let visible_width = (bounds.size.width - px(1.)).max(px(0.));
-                            let caret = line.x_for_index(input.edit.cursor);
+                            let placeholder = input.text().is_empty();
+                            let rows: usize = lines
+                                .iter()
+                                .map(|(_, line)| {
+                                    (line.size(height).height / height).round() as usize
+                                })
+                                .sum::<usize>()
+                                .max(1);
+                            if rows != input.rows {
+                                input.rows = rows;
+                                cx.notify();
+                            }
+                            // A placeholder is painted but never edited: positions
+                            // only count once there is text (see `position`).
+                            input.layout = lines;
+                            input.bounds = Some(bounds);
+                            // Keep the caret in view.
+                            let caret = input.position(input.edit.cursor);
+                            let view = bounds.size.height;
                             input.scroll = input
                                 .scroll
-                                .min((line.width - visible_width).max(px(0.)))
-                                .min(caret)
-                                .max(caret - visible_width)
+                                .min(caret.y)
+                                .max(caret.y + height - view)
                                 .max(px(0.));
-                            if input.text().is_empty() {
-                                input.scroll = px(0.);
-                            }
-                            let origin = point(bounds.left() - input.scroll, bounds.top());
                             window.handle_input(
                                 &input.focus,
                                 ViewInputHandler::new(bounds, cx.entity()),
                                 cx,
                             );
+                            let origin = point(bounds.left(), bounds.top() - input.scroll);
                             window.with_content_mask(Some(ContentMask { bounds }), |window| {
+                                let focused = input.focus.is_focused(window);
                                 let selection = input.edit.selection();
-                                if input.focus.is_focused(window) && !selection.is_empty() {
-                                    window.paint_quad(fill(
-                                        Bounds::from_corners(
-                                            point(
-                                                origin.x + line.x_for_index(selection.start),
-                                                bounds.top(),
+                                if focused && !selection.is_empty() && !placeholder {
+                                    let from = input.position(selection.start);
+                                    let to = input.position(selection.end);
+                                    let mut y = from.y;
+                                    while y <= to.y {
+                                        let left = if y == from.y { from.x } else { px(0.) };
+                                        let right =
+                                            if y == to.y { to.x } else { bounds.size.width };
+                                        window.paint_quad(fill(
+                                            Bounds::from_corners(
+                                                point(origin.x + left, origin.y + y),
+                                                point(origin.x + right, origin.y + y + height),
                                             ),
-                                            point(
-                                                origin.x + line.x_for_index(selection.end),
-                                                bounds.bottom(),
-                                            ),
-                                        ),
-                                        rgb(input.theme.active),
-                                    ));
+                                            rgb(input.theme.active),
+                                        ));
+                                        y += height;
+                                    }
                                 }
-                                let _ =
-                                    line.paint(origin, height, TextAlign::Left, None, window, cx);
-                                if input.focus.is_focused(window) {
+                                let mut top = origin.y;
+                                for (_, line) in &input.layout {
+                                    let _ = line.paint(
+                                        point(origin.x, top),
+                                        height,
+                                        TextAlign::Left,
+                                        None,
+                                        window,
+                                        cx,
+                                    );
+                                    top += line.size(height).height;
+                                }
+                                if focused {
                                     window.paint_quad(fill(
                                         Bounds::new(
-                                            point(origin.x + caret, bounds.top()),
+                                            point(origin.x + caret.x, origin.y + caret.y),
                                             size(px(1.), height),
                                         ),
                                         rgb(input.theme.cursor),
                                     ));
                                 }
                             });
-                            input.bounds = Some(bounds);
-                            input.layout = Some(line);
                         });
                     },
                 )
                 .w_full()
-                .h(height),
+                .h(height * visible),
             )
     }
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn utf16_ranges_are_clamped_to_scalar_boundaries() {
-        let text = "a\u{1f600}\u{e9}\u{4e2d}";
-        assert_eq!(byte_range(text, 1..3), 1..5);
-        assert_eq!(byte_range(text, 2..99), 5..text.len());
-        assert_eq!(byte_range(text, Range { start: 99, end: 1 }), 1..text.len());
-        for (byte, _) in text.char_indices() {
-            assert_eq!(from_utf16(text, to_utf16(text, byte)), byte);
-        }
-    }
-
-    #[test]
-    fn replaces_unicode_selection_and_explicit_utf16_range() {
-        let mut edit = Editing::default();
-        assert!(edit.replace(None, "a\u{1f600}\u{e9}z", false, None));
-        edit.anchor = 7;
-        edit.cursor = 1;
-        assert_eq!(edit.selection(), 1..7);
-        assert!(edit.replace(None, "\u{4e2d}", false, None));
-        assert_eq!(edit.text, "a\u{4e2d}z");
-        assert_eq!(edit.cursor, 4);
-        assert!(edit.replace(Some(1..2), "\u{1f600}", false, None));
-        assert_eq!(edit.text, "a\u{1f600}z");
-        assert_eq!(edit.cursor, 5);
-        assert_eq!(edit.previous(), 1);
-        edit.select_to(1, false);
-        assert_eq!(edit.next(), 5);
-    }
-
-    #[test]
-    fn composition_selection_is_relative_to_inserted_text() {
-        let mut edit = Editing::default();
-        edit.replace(None, "\u{1f600}prefix", false, None);
-        let start = edit.cursor;
-        edit.replace(None, "\u{4e2d}\u{1f600}a", true, Some(1..3));
-        assert_eq!(edit.selection(), start + 3..start + 7);
-        assert_eq!(edit.marked, Some(start..start + 8));
-        edit.replace(None, "\u{e9}", true, Some(0..1));
-        assert_eq!(edit.selection(), start..start + 2);
-        assert_eq!(edit.marked, Some(start..start + 2));
-        assert!(!edit.replace(None, "\u{e9}", false, None));
-        assert_eq!(edit.marked, None);
-        assert_eq!(edit.selection(), start + 2..start + 2);
-        assert_eq!(edit.text, "\u{1f600}prefix\u{e9}");
-    }
-
-    #[test]
-    fn strips_newlines_and_maps_composition_selection() {
-        let mut edit = Editing::default();
-        edit.replace(None, "a\r\n\u{1f600}\nz", true, Some(3..6));
-        assert_eq!(edit.text, "a\u{1f600}z");
-        assert_eq!(edit.selection(), 1..5);
-        edit.replace(None, "", true, None);
-        assert!(edit.text.is_empty());
-        assert_eq!(edit.marked, None);
-        assert_eq!(edit.selection(), 0..0);
-        assert!(!edit.replace(None, "\r\n", false, None));
-    }
-
-    #[gpui::test]
-    fn cmd_arrows_and_cmd_backspace_reach_the_line_ends(cx: &mut gpui::TestAppContext) {
-        let (input, cx) = cx.add_window_view(|_, cx| SearchInput::new(cx));
-        cx.update(|window, cx| {
-            input.update(cx, |input, cx| {
-                input.edit.replace(None, "one two", false, None);
-                input.edit.select_to(3, false);
-                window.focus(&input.focus, cx);
-            });
-            window.draw(cx).clear(cx);
-        });
-        let edit = |cx: &mut gpui::VisualTestContext| {
-            input.read_with(cx, |input, _| {
-                (input.edit.text.clone(), input.edit.selection())
-            })
-        };
-        cx.simulate_keystrokes("cmd-shift-right");
-        assert_eq!(edit(cx), ("one two".into(), 3..7));
-        cx.simulate_keystrokes("cmd-left");
-        assert_eq!(edit(cx), ("one two".into(), 0..0));
-        cx.simulate_keystrokes("cmd-right left left cmd-backspace");
-        assert_eq!(edit(cx), ("wo".into(), 0..0));
-        cx.simulate_keystrokes("cmd-delete");
-        assert_eq!(edit(cx), (String::new(), 0..0));
-    }
-
-    #[test]
-    fn extending_selection_can_cross_its_anchor() {
-        let mut edit = Editing::default();
-        edit.replace(None, "a\u{1f600}b", false, None);
-        edit.select_to(1, false);
-        edit.select_to(0, true);
-        assert_eq!(edit.selection(), 0..1);
-        edit.select_to(5, true);
-        assert_eq!(edit.selection(), 1..5);
-        edit.select_to(edit.next(), true);
-        assert_eq!(edit.selection(), 1..6);
-    }
-}
+mod tests;

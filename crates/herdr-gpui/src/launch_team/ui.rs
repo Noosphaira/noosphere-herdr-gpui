@@ -66,9 +66,9 @@ impl HerdrWindow {
         let Some(launch) = &self.launch_team else {
             return;
         };
-        let composing = [&launch.path, &launch.branch, &launch.task]
-            .iter()
-            .any(|field| field.read(cx).is_composing());
+        let composing = launch.path.read(cx).is_composing()
+            || launch.branch.read(cx).is_composing()
+            || launch.task.read(cx).is_composing();
         // The fields edit themselves; only these keys belong to the dialog.
         if composing || !matches!(event.keystroke.key.as_str(), "escape" | "enter" | "tab") {
             return;
@@ -87,8 +87,12 @@ impl HerdrWindow {
         let Some(launch) = &self.launch_team else {
             return;
         };
-        let fields =
-            [&launch.path, &launch.branch, &launch.task].map(|field| field.read(cx).focus.clone());
+        let fields = [&launch.path, &launch.branch].map(|field| field.read(cx).focus.clone());
+        let fields = [
+            fields[0].clone(),
+            fields[1].clone(),
+            launch.task.read(cx).focus.clone(),
+        ];
         let next = fields
             .iter()
             .position(|focus| focus.is_focused(window))
@@ -352,8 +356,17 @@ impl HerdrWindow {
             .child(row(
                 "Task",
                 div()
+                    .flex()
+                    .flex_col()
+                    .gap(px(2.))
                     .debug_selector(|| "launch-team-task".into())
                     .child(launch.task.clone())
+                    .child(
+                        div()
+                            .text_size(px(self.config.ui.size * 0.85))
+                            .text_color(muted)
+                            .child("Shift+Enter for a new line"),
+                    )
                     .into_any_element(),
             ))
             .child(

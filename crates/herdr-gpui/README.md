@@ -1129,7 +1129,8 @@ The work is done by `herdr-launch` on the workspace's host, so it must be
 installed there; see [`contrib/local-agents`](../../contrib/local-agents/README.md)
 for setup, team files, folder grants, and the sandbox. Like Fan out, it runs
 as a host script, locally or over SSH, on Linux and macOS clients. Closing the
-dialog does not stop a launch that has started. The task is a single line.
+dialog does not stop a launch that has started. The Task field takes several
+lines: Shift+Enter starts a new line, Enter launches.
 
 ## Teleport
 

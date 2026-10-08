@@ -21,7 +21,7 @@ fn launch_team(cx: &mut TestAppContext) -> LaunchTeam {
     let fields = Fields {
         path: cx.new(SearchInput::new),
         branch: cx.new(SearchInput::new),
-        task: cx.new(SearchInput::new),
+        task: cx.new(crate::multiline_input::MultilineInput::new),
     };
     let repos = vec![Repo {
         key: "/nonexistent/app/.git".into(),

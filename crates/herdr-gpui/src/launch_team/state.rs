@@ -9,7 +9,7 @@ use super::{
     error::Error,
     job::{self, Launched, Request},
 };
-use crate::{search_input::SearchInput, teleport::Host};
+use crate::{multiline_input::MultilineInput, search_input::SearchInput, teleport::Host};
 use gpui::Entity;
 use std::sync::{
     Arc,
@@ -86,7 +86,7 @@ pub(crate) enum Update {
 pub(crate) struct Fields {
     pub(crate) path: Entity<SearchInput>,
     pub(crate) branch: Entity<SearchInput>,
-    pub(crate) task: Entity<SearchInput>,
+    pub(crate) task: Entity<MultilineInput>,
 }
 
 enum Event {
@@ -104,7 +104,7 @@ pub(crate) struct LaunchTeam {
     /// A repository path typed on the host; used instead of `repo` when set.
     pub(crate) path: Entity<SearchInput>,
     pub(crate) branch: Entity<SearchInput>,
-    pub(crate) task: Entity<SearchInput>,
+    pub(crate) task: Entity<MultilineInput>,
     pub(crate) error: Option<Error>,
     sender: mpsc::Sender<Event>,
     events: mpsc::Receiver<Event>,

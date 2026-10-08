@@ -7,6 +7,7 @@ use super::Page;
 use crate::{
     HerdrWindow,
     launch_team::{Fields, LaunchTeam, Origin, Repo},
+    multiline_input::MultilineInput,
     search_input::SearchInput,
     teleport::host_for,
     window::Flash,
@@ -169,7 +170,14 @@ impl HerdrWindow {
         let fields = Fields {
             path: field("Or a repository path on this host, e.g. ~/code/app", cx),
             branch: field("feature-name", cx),
-            task: field("What the team should do", cx),
+            task: {
+                let input = cx.new(MultilineInput::new);
+                input.update(cx, |input, cx| {
+                    input.set_placeholder("What the team should do", cx);
+                    input.set_appearance(self.config.ui.clone(), self.theme.clone(), cx);
+                });
+                input
+            },
         };
         // With a repository picked, the branch is what is left to type.
         let first = if repo.is_some() {

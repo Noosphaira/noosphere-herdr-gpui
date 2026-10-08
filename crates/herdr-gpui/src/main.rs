@@ -55,6 +55,7 @@ mod menus;
 #[cfg(feature = "mockup")]
 mod mockup;
 mod motion;
+mod multiline_input;
 mod navigation;
 mod notifications;
 mod osc52;
