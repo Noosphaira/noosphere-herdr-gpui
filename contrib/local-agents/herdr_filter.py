@@ -19,6 +19,7 @@ import json
 import os
 import socket
 import threading
+import time
 
 import herdr_team
 
@@ -119,7 +120,7 @@ class Filter:
             raise TeamError(error.get("code", "herdr_error"), error.get("message", "herdr refused"))
         with herdr_team.state(self.team_dir) as current:
             current["active"] = to
-            current["log"].append({"from": self.role, "to": to, "feedback": feedback, "text": text[:200]})
+            current["log"].append({"time": time.time(), "from": self.role, "to": to, "feedback": feedback, "text": text[:200]})
         return {"delivered_to": to}
 
     def team_done(self, params):
@@ -127,7 +128,7 @@ class Filter:
         with herdr_team.state(self.team_dir) as current:
             current["done"] = True
             current["summary"] = summary
-            current["log"].append({"from": self.role, "done": True, "text": summary[:200]})
+            current["log"].append({"time": time.time(), "from": self.role, "done": True, "text": summary[:200]})
         herdr_team.notify(f"Team finished: {self.team['branch']}", summary or f"{self.role} marked it done")
         return {"done": True}
 
