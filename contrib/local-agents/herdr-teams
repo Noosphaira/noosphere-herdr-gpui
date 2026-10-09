@@ -1,0 +1,385 @@
+#!/usr/bin/env python3
+"""Read and change teams, agents and folder access, as JSON. For the GUI.
+
+  herdr-teams load            print everything as one JSON object
+  herdr-teams apply           read one change as JSON on stdin, validate the
+                              result, write it, and print the new state
+
+A change is one of:
+  {"op": "save_team",    "team": {...}, "previous": "<old name or null>"}
+  {"op": "delete_team",  "name": "..."}
+  {"op": "save_agent",   "agent": {...}, "previous": "<old name or null>"}
+  {"op": "delete_agent", "name": "..."}
+  {"op": "save_access",  "access": {...}}
+
+Every reply is {"ok": true, "state": {...}} or {"ok": false, "errors": [...]}.
+Nothing is written unless the whole configuration still validates, using the
+same rules herdr-launch applies, and each file is replaced atomically.
+
+Files: teams in ~/.config/herdr-launch/teams/<name>.yaml, folder access in
+~/.config/herdr-launch/{global,repos}.yaml, agents in
+~/.config/opencode/agents/<name>.md (YAML front matter + prompt). Keys this
+tool does not know are kept; YAML comments are not.
+"""
+
+import json
+import os
+import re
+import sys
+import tempfile
+from pathlib import Path
+
+import yaml
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import herdr_grants  # noqa: E402
+
+TEAMS_DIR = herdr_grants.CONFIG_DIR / "teams"
+AGENTS_DIR = Path.home() / ".config/opencode/agents"
+OPENCODE_CONFIG = Path.home() / ".config/opencode/opencode.json"
+NAME = re.compile(r"^[a-z][a-z0-9-]{0,39}$")
+MAX_ROUNDS = 10
+MAX_STEPS = 1000
+# Front matter this tool owns; anything else in an agent file is kept as is.
+AGENT_KEYS = {"description", "mode", "model", "chat_template_kwargs", "temperature", "steps"}
+TEAM_KEYS = {"team", "roles", "flow", "review_rounds"}
+
+
+class Invalid(Exception):
+    pass
+
+
+# --- reading ---------------------------------------------------------------
+
+def read_yaml(path, default):
+    try:
+        return herdr_grants.read_yaml(path, default)
+    except herdr_grants.GrantError as error:
+        raise Invalid(str(error)) from error
+
+
+def split_front_matter(text):
+    if text.startswith("---\n"):
+        end = text.find("\n---", 4)
+        if end != -1:
+            meta = yaml.safe_load(text[4:end]) or {}
+            body = text[end + 4:].lstrip("\n")
+            if isinstance(meta, dict):
+                return meta, body
+    return {}, text
+
+
+def load_agent(path):
+    meta, prompt = split_front_matter(path.read_text())
+    kwargs = meta.get("chat_template_kwargs") or {}
+    thinking = kwargs.get("enable_thinking", True) if isinstance(kwargs, dict) else True
+    return {
+        "name": path.stem,
+        "description": str(meta.get("description", "")),
+        "model": str(meta.get("model", "")),
+        "thinking": bool(thinking),
+        "temperature": meta.get("temperature"),
+        "steps": meta.get("steps"),
+        "prompt": prompt.rstrip("\n"),
+        "extra": {k: v for k, v in meta.items() if k not in AGENT_KEYS},
+        "extra_template_kwargs": (
+            {k: v for k, v in kwargs.items() if k != "enable_thinking"} if isinstance(kwargs, dict) else {}
+        ),
+    }
+
+
+def load_team(path):
+    data = read_yaml(path, {})
+    if not isinstance(data, dict):
+        raise Invalid(f"{path} is not a mapping")
+    roles = data.get("roles") or []
+    flow = data.get("flow") or roles
+    return {
+        "name": path.stem,
+        # The GUI edits one order: the work order, which is also pane order.
+        "roles": list(flow) if sorted(flow) == sorted(roles) else list(roles),
+        "review_rounds": data.get("review_rounds", 2),
+        "extra": {k: v for k, v in data.items() if k not in TEAM_KEYS},
+    }
+
+
+def load_access():
+    global_cfg = read_yaml(herdr_grants.CONFIG_DIR / "global.yaml", {}) or {}
+    repos_cfg = read_yaml(herdr_grants.CONFIG_DIR / "repos.yaml", []) or []
+
+    def paths(section, key):
+        value = section.get(key) or []
+        return [str(p) for p in value] if isinstance(value, list) else []
+
+    return {
+        "global": {
+            "read_only": paths(global_cfg, "read_only"),
+            "read_write": paths(global_cfg, "read_write"),
+            "env": paths(global_cfg, "env"),
+            "path": paths(global_cfg, "path"),
+        },
+        "repos": [
+            {
+                "repo": str(entry.get("repo", "")),
+                "read_only": paths(entry, "read_only"),
+                "read_write": paths(entry, "read_write"),
+            }
+            for entry in repos_cfg
+            if isinstance(entry, dict)
+        ],
+    }
+
+
+def available_models():
+    """`provider/model` names OpenCode is configured with."""
+    try:
+        config = json.loads(OPENCODE_CONFIG.read_text())
+    except (OSError, ValueError):
+        return []
+    models = []
+    for provider, settings in (config.get("provider") or {}).items():
+        for model in (settings.get("models") or {}):
+            models.append(f"{provider}/{model}")
+    return sorted(models)
+
+
+def load_state():
+    teams = [load_team(p) for p in sorted(TEAMS_DIR.glob("*.yaml"))] if TEAMS_DIR.is_dir() else []
+    agents = [load_agent(p) for p in sorted(AGENTS_DIR.glob("*.md"))] if AGENTS_DIR.is_dir() else []
+    return {
+        "teams": teams,
+        "agents": agents,
+        "access": load_access(),
+        "models": available_models(),
+        "paths": {
+            "teams": str(TEAMS_DIR),
+            "agents": str(AGENTS_DIR),
+            "access": str(herdr_grants.CONFIG_DIR),
+        },
+    }
+
+
+# --- validating ------------------------------------------------------------
+
+def check_name(kind, name):
+    if not isinstance(name, str) or not NAME.match(name):
+        raise Invalid(f"{kind} name {name!r}: use lowercase letters, digits and dashes, starting with a letter")
+
+
+def check_team(team, agent_names):
+    check_name("team", team["name"])
+    roles = team.get("roles")
+    if not isinstance(roles, list) or not roles:
+        raise Invalid(f"team {team['name']}: needs at least one role")
+    if len(set(roles)) != len(roles):
+        raise Invalid(f"team {team['name']}: a role is listed twice")
+    missing = [r for r in roles if r not in agent_names]
+    if missing:
+        raise Invalid(f"team {team['name']}: no agent named {', '.join(missing)}")
+    rounds = team.get("review_rounds")
+    if not isinstance(rounds, int) or isinstance(rounds, bool) or not 0 <= rounds <= MAX_ROUNDS:
+        raise Invalid(f"team {team['name']}: review rounds must be 0 to {MAX_ROUNDS}")
+
+
+def check_agent(agent):
+    check_name("agent", agent["name"])
+    if not str(agent.get("model", "")).strip():
+        raise Invalid(f"agent {agent['name']}: pick a model")
+    if not str(agent.get("prompt", "")).strip():
+        raise Invalid(f"agent {agent['name']}: the prompt is empty")
+    temperature = agent.get("temperature")
+    if temperature is not None and (
+        not isinstance(temperature, (int, float)) or isinstance(temperature, bool) or not 0 <= temperature <= 2
+    ):
+        raise Invalid(f"agent {agent['name']}: temperature must be 0 to 2, or empty for the model's default")
+    steps = agent.get("steps")
+    if steps is not None and (not isinstance(steps, int) or isinstance(steps, bool) or not 1 <= steps <= MAX_STEPS):
+        raise Invalid(f"agent {agent['name']}: step limit must be 1 to {MAX_STEPS}, or empty for none")
+
+
+def check_access(access):
+    """The same rules herdr-launch applies, for every grant."""
+    def check_list(paths, mode, where):
+        if not isinstance(paths, list) or not all(isinstance(p, str) and p.strip() for p in paths):
+            raise Invalid(f"{where}: {mode} must be a list of paths")
+        for raw in paths:
+            try:
+                herdr_grants.check(herdr_grants.expand(raw), mode, where)
+            except herdr_grants.GrantError as error:
+                raise Invalid(str(error)) from error
+
+    g = access.get("global") or {}
+    check_list(g.get("read_only", []), "read_only", "all repos")
+    check_list(g.get("read_write", []), "read_write", "all repos")
+    seen = set()
+    for entry in access.get("repos") or []:
+        repo = str(entry.get("repo", "")).strip()
+        if not repo:
+            raise Invalid("a repo entry has no repository path")
+        resolved = herdr_grants.expand(repo)
+        if not (resolved / ".git").exists():
+            raise Invalid(f"{repo} is not a git repository's main checkout")
+        if resolved in seen:
+            raise Invalid(f"{repo} is listed twice")
+        seen.add(resolved)
+        check_list(entry.get("read_only", []), "read_only", repo)
+        check_list(entry.get("read_write", []), "read_write", repo)
+
+
+def check_state(state, access):
+    agent_names = set()
+    for agent in state["agents"]:
+        check_agent(agent)
+        if agent["name"] in agent_names:
+            raise Invalid(f"two agents are named {agent['name']}")
+        agent_names.add(agent["name"])
+    team_names = set()
+    for team in state["teams"]:
+        check_team(team, agent_names)
+        if team["name"] in team_names:
+            raise Invalid(f"two teams are named {team['name']}")
+        team_names.add(team["name"])
+    # Grants are checked when they are saved; an unrelated save must not fail
+    # because a granted folder has since disappeared (launch reports that).
+    if access:
+        check_access(state["access"])
+
+
+# --- writing ---------------------------------------------------------------
+
+def write_atomic(path, text):
+    path.parent.mkdir(parents=True, exist_ok=True)
+    # Through symlinks, so a linked config file keeps its link.
+    target = path.resolve() if path.is_symlink() else path
+    fd, temporary = tempfile.mkstemp(dir=target.parent, prefix=f".{target.name}.")
+    try:
+        with os.fdopen(fd, "w") as handle:
+            handle.write(text)
+        if target.exists():
+            os.chmod(temporary, target.stat().st_mode & 0o777)
+        os.replace(temporary, target)
+    except BaseException:
+        Path(temporary).unlink(missing_ok=True)
+        raise
+
+
+def dump(data):
+    return yaml.safe_dump(data, sort_keys=False, allow_unicode=True, width=100)
+
+
+def team_text(team):
+    data = {"team": team["name"], **(team.get("extra") or {})}
+    data["roles"] = list(team["roles"])
+    data["flow"] = list(team["roles"])
+    data["review_rounds"] = team["review_rounds"]
+    return "# Edited with Herdr's Teams settings. Roles work in this order.\n" + dump(data)
+
+
+def agent_text(agent):
+    meta = {"description": agent.get("description", "").strip(), "mode": "primary", "model": agent["model"]}
+    kwargs = dict(agent.get("extra_template_kwargs") or {})
+    if not agent.get("thinking", True):
+        kwargs["enable_thinking"] = False
+    if kwargs:
+        meta["chat_template_kwargs"] = kwargs
+    if agent.get("temperature") is not None:
+        meta["temperature"] = agent["temperature"]
+    if agent.get("steps") is not None:
+        meta["steps"] = agent["steps"]
+    meta.update(agent.get("extra") or {})
+    return f"---\n{dump(meta)}---\n{agent['prompt'].rstrip()}\n"
+
+
+def access_texts(access):
+    g = access["global"]
+    global_text = "# Folders every sandboxed agent gets. Edited with Herdr's Teams settings.\n" + dump(
+        {"read_only": g.get("read_only", []), "read_write": g.get("read_write", []),
+         "env": g.get("env", []), "path": g.get("path", [])}
+    )
+    repos = [
+        {"repo": e["repo"], "read_only": e.get("read_only", []), "read_write": e.get("read_write", [])}
+        for e in access.get("repos", [])
+    ]
+    repos_text = "# Extra folders per repo. Edited with Herdr's Teams settings.\n" + dump(repos)
+    return global_text, repos_text
+
+
+# --- changes ---------------------------------------------------------------
+
+def replace(items, previous, new):
+    names = [item["name"] for item in items]
+    key = previous if previous in names else new["name"]
+    if previous is None and new["name"] in names:
+        raise Invalid(f"{new['name']} already exists")
+    out = [new if item["name"] == key else item for item in items]
+    if key not in names:
+        out.append(new)
+    return out
+
+
+def apply(change, state):
+    """Returns the files to write and remove for `change`, and the new state."""
+    op = change.get("op")
+    writes, removes = {}, []
+    if op == "save_team":
+        team = change["team"]
+        previous = change.get("previous")
+        state["teams"] = replace(state["teams"], previous, team)
+        writes[TEAMS_DIR / f"{team['name']}.yaml"] = team_text(team)
+        if previous and previous != team["name"]:
+            removes.append(TEAMS_DIR / f"{previous}.yaml")
+    elif op == "delete_team":
+        state["teams"] = [t for t in state["teams"] if t["name"] != change["name"]]
+        removes.append(TEAMS_DIR / f"{change['name']}.yaml")
+    elif op == "save_agent":
+        agent = change["agent"]
+        previous = change.get("previous")
+        state["agents"] = replace(state["agents"], previous, agent)
+        writes[AGENTS_DIR / f"{agent['name']}.md"] = agent_text(agent)
+        if previous and previous != agent["name"]:
+            removes.append(AGENTS_DIR / f"{previous}.md")
+            # A renamed agent keeps its places in every team.
+            for team in state["teams"]:
+                if previous in team["roles"]:
+                    team["roles"] = [agent["name"] if r == previous else r for r in team["roles"]]
+                    writes[TEAMS_DIR / f"{team['name']}.yaml"] = team_text(team)
+    elif op == "delete_agent":
+        users = [t["name"] for t in state["teams"] if change["name"] in t["roles"]]
+        if users:
+            raise Invalid(f"{change['name']} is a role in {', '.join(users)}; remove it there first")
+        state["agents"] = [a for a in state["agents"] if a["name"] != change["name"]]
+        removes.append(AGENTS_DIR / f"{change['name']}.md")
+    elif op == "save_access":
+        state["access"] = change["access"]
+        global_text, repos_text = access_texts(state["access"])
+        writes[herdr_grants.CONFIG_DIR / "global.yaml"] = global_text
+        writes[herdr_grants.CONFIG_DIR / "repos.yaml"] = repos_text
+    else:
+        raise Invalid(f"unknown change {op!r}")
+    return writes, removes, state
+
+
+def main():
+    command = sys.argv[1] if len(sys.argv) > 1 else ""
+    try:
+        if command == "load":
+            print(json.dumps({"ok": True, "state": load_state()}))
+            return
+        if command != "apply":
+            sys.exit(__doc__.strip())
+        change = json.load(sys.stdin)
+        writes, removes, state = apply(change, load_state())
+        check_state(state, access=change.get("op") == "save_access")
+        for path, text in writes.items():
+            write_atomic(path, text)
+        for path in removes:
+            if path not in writes:
+                path.unlink(missing_ok=True)
+        print(json.dumps({"ok": True, "state": load_state()}))
+    except (Invalid, KeyError, TypeError, ValueError, yaml.YAMLError) as error:
+        message = str(error) if isinstance(error, Invalid) else f"invalid change: {error}"
+        print(json.dumps({"ok": False, "errors": [message]}))
+
+
+if __name__ == "__main__":
+    main()

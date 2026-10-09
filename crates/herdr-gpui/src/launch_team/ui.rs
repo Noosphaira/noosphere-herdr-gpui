@@ -345,7 +345,30 @@ impl HerdrWindow {
             .px(px(16.))
             .py(px(12.))
             .child(row("Repo", repos))
-            .child(row("Team", teams))
+            .child(row(
+                "Team",
+                div()
+                    .flex()
+                    .flex_wrap()
+                    .items_center()
+                    .gap(px(8.))
+                    .child(teams)
+                    .child(
+                        div()
+                            .id("launch-team-manage")
+                            .debug_selector(|| "launch-team-manage".into())
+                            .text_color(muted)
+                            .cursor_pointer()
+                            .hover(|link| link.text_color(rgb(theme.foreground)))
+                            .child("Manage teams...")
+                            .on_click(cx.listener(|this, _, window, cx| {
+                                cx.stop_propagation();
+                                this.dismiss_menu(window, cx);
+                                crate::settings_window::open_teams(cx.weak_entity(), cx);
+                            })),
+                    )
+                    .into_any_element(),
+            ))
             .child(row(
                 "Branch",
                 div()

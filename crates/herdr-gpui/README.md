@@ -1132,6 +1132,31 @@ as a host script, locally or over SSH, on Linux and macOS clients. Closing the
 dialog does not stop a launch that has started. The Task field takes several
 lines: Shift+Enter starts a new line, Enter launches.
 
+## Teams Settings
+
+**Settings → Teams** (or **Manage teams...** in the Launch team dialog) edits
+what Launch team uses, on the device selected in the main window: this
+computer, or a saved SSH host (over SSH, like Launch team; `herdr-teams` must be
+installed there). Selecting another device reloads it and drops unsaved edits.
+For an SSH host, folders are typed rather than picked, since the folder picker
+only sees this computer.
+
+- **Teams**: name, roles in work order (which is also pane order; reorder with
+  the arrows, add from your agents), and how many review rounds later roles
+  may send work back.
+- **Agents**: name, description, model (from OpenCode's configured models),
+  thinking on or off, temperature, step limit, and the prompt.
+- **Folder access**: folders every sandboxed agent gets, and extra folders per
+  repository, each read-only or read-write; **Browse...** uses the desktop's
+  folder picker.
+
+Edits are drafts until **Save**; **Revert** restores the saved version, and
+deleting asks for a second click. Saving runs `herdr-teams` (see
+[`contrib/local-agents`](../../contrib/local-agents/README.md)), which refuses
+the change with a reason, and writes nothing, if the result would be invalid:
+a team with an unknown role, a bad name, or a grant of a protected folder.
+Running agents are unaffected; changes apply to the next launch.
+
 ## Teleport
 
 Right-click a linked worktree and choose Teleport... to move it to another

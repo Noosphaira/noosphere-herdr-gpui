@@ -96,6 +96,6 @@ pub(super) fn fixture() -> Loaded {
     }
 }
 
-fn open_fixture(source: WeakEntity<HerdrWindow>, cx: &mut App) {
+pub(super) fn open_fixture(source: WeakEntity<HerdrWindow>, cx: &mut App) {
     open_with(source, cx, |_, _, _| {});
 }

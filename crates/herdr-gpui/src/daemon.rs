@@ -34,7 +34,7 @@ pub fn connect(
         Duration::from_secs(20),
         || {
             on_start();
-            let mut command = Command::new(executable());
+            let mut command = server_command(&executable());
             if let ConnectTarget::Session { name, .. } = target {
                 command.args(["--session", name]);
             }
@@ -53,6 +53,29 @@ pub fn connect(
     )?;
     let local = is_local_peer(&stream, target, &socket);
     Ok((stream, local))
+}
+
+/// The command that starts `herdr` as a server. On Linux it runs under
+/// `setsid --wait`, so the server leads its own session: herdr only lets other
+/// machines save this one as an SSH device when its server is a detached
+/// daemon (a session leader), and a new process group alone is not one.
+/// `--wait` keeps the spawned process alive exactly as long as the server, so
+/// an early exit is still noticed. Without `setsid`, or when herdr itself is
+/// missing (so the missing install is still reported as such), herdr runs
+/// directly.
+fn server_command(herdr: &Path) -> Command {
+    #[cfg(target_os = "linux")]
+    if herdr.is_file()
+        && let Some(setsid) = ["/usr/bin/setsid", "/bin/setsid"]
+            .into_iter()
+            .map(Path::new)
+            .find(|path| path.is_file())
+    {
+        let mut command = Command::new(setsid);
+        command.arg("--wait").arg(herdr);
+        return command;
+    }
+    Command::new(herdr)
 }
 
 /// Windows resolves a bare command name to `herdr.exe`; an explicit probe has to
