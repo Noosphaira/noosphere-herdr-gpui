@@ -364,6 +364,9 @@ impl SettingsWindow {
         if self.section == Section::Integrations {
             cx.notify();
         }
+        if self.section == Section::Teams {
+            self.follow_teams_device(cx);
+        }
         if self.section == Section::General {
             self.sync_remote_history(false, cx);
         }

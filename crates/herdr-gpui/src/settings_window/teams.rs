@@ -4,7 +4,10 @@
 //! The files are owned by the `herdr-teams` script (`contrib/local-agents`),
 //! which loads them as JSON and applies one validated change at a time, with
 //! the same rules `herdr-launch` enforces. This section only edits drafts and
-//! sends changes; it never writes those files itself. Local host only.
+//! sends changes; it never writes those files itself.
+//!
+//! It edits the device selected in the main window, as Launch team launches
+//! there: this computer, or a saved SSH host through a host script.
 
 mod drafts;
 mod model;
@@ -46,6 +49,15 @@ pub(super) enum Tab {
     Access,
 }
 
+/// The device whose teams are being edited.
+#[derive(Debug, Clone)]
+pub(super) struct Device {
+    /// The endpoint's id, to notice when the main window selects another.
+    pub(super) id: String,
+    pub(super) label: String,
+    pub(super) host: Host,
+}
+
 /// What is selected in a list: a saved item by name, or a new one.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(super) enum Selected {
@@ -65,6 +77,8 @@ pub(super) struct Inputs {
 
 pub(super) struct TeamsEditor {
     pub(super) tab: Tab,
+    /// Where `state` came from and where changes go.
+    pub(super) device: Option<Device>,
     pub(super) state: Option<State>,
     pub(super) loading: bool,
     pub(super) busy: bool,
@@ -92,6 +106,7 @@ impl TeamsEditor {
         });
         Self {
             tab: Tab::default(),
+            device: None,
             state: None,
             loading: false,
             busy: false,
@@ -129,9 +144,7 @@ pub(super) fn script(change: Option<&Change>) -> String {
 }
 
 /// Blocking: run on a background executor.
-pub(super) fn run(change: Option<&Change>) -> Result<State, Error> {
-    let host = Host::new(&herdr_client::ConnectTarget::Local)
-        .map_err(|_| Error::Refused(vec!["this computer cannot run host scripts".into()]))?;
+pub(super) fn run(host: &Host, change: Option<&Change>) -> Result<State, Error> {
     let output = host
         .capture(&script(change), &AtomicBool::new(false))
         .map_err(Error::Script)?;

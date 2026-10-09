@@ -1,7 +1,7 @@
 //! Loading, selecting, and saving in the Teams section.
 
 use super::{
-    AccessScope, Change, Selected, State, Tab,
+    AccessScope, Change, Device, Selected, State, Tab,
     drafts::{FieldError, Mode},
 };
 use crate::settings_window::SettingsWindow;
@@ -15,20 +15,75 @@ pub(super) enum After {
 }
 
 impl SettingsWindow {
+    /// The device selected in the main window, if its teams can be edited:
+    /// this computer or a saved SSH host (custom sockets cannot be scripted).
+    pub(super) fn teams_device(&self, cx: &App) -> Option<Device> {
+        let source = self.source.upgrade()?;
+        let source = source.read(cx);
+        let endpoint = source.endpoints.get(source.selected_endpoint)?;
+        let host = crate::teleport::host_for(&endpoint.connection.target).ok()?;
+        Some(Device {
+            id: endpoint.id.clone(),
+            label: endpoint.label.clone(),
+            host,
+        })
+    }
+
+    /// Reload when the main window has selected another device since the
+    /// last load. Unsaved drafts belong to the old device and are dropped.
+    pub(in crate::settings_window) fn follow_teams_device(&mut self, cx: &mut Context<Self>) {
+        let current = self.teams_device(cx).map(|d| d.id);
+        if current != self.teams.device.as_ref().map(|d| d.id.clone()) {
+            self.load_teams(cx);
+        }
+    }
+
     pub(in crate::settings_window) fn load_teams(&mut self, cx: &mut Context<Self>) {
         // Tests supply their state directly instead of reading this
         // machine's files through herdr-teams.
         if cfg!(test) || self.teams.loading || self.teams.busy {
             return;
         }
+        let Some(device) = self.teams_device(cx) else {
+            self.teams.device = None;
+            self.teams.state = None;
+            self.teams.error = Some(
+                "The selected device's teams cannot be edited from here: pick this computer or a saved SSH host."
+                    .into(),
+            );
+            cx.notify();
+            return;
+        };
+        if self.teams.device.as_ref().is_none_or(|d| d.id != device.id) {
+            // Another device: nothing from the last one carries over.
+            self.teams.state = None;
+            self.teams.team = None;
+            self.teams.agent = None;
+            self.teams.notice = None;
+        }
+        let hint = if device.host.is_remote() {
+            format!("A folder on {}, e.g. ~/design-assets", device.label)
+        } else {
+            "A folder on this computer, e.g. ~/design-assets".to_owned()
+        };
+        self.teams
+            .inputs
+            .access_path
+            .update(cx, |input, cx| input.set_placeholder(&hint, cx));
+        self.teams.device = Some(device.clone());
         self.teams.loading = true;
+        let id = device.id.clone();
         let task = cx
             .background_executor()
-            .spawn(async move { super::run(None) });
+            .spawn(async move { super::run(&device.host, None) });
         cx.spawn(async move |this, cx| {
             let result = task.await;
             let _ = this.update(cx, |this, cx| {
                 this.teams.loading = false;
+                // A load for a device no longer selected is stale.
+                if this.teams.device.as_ref().is_none_or(|d| d.id != id) {
+                    return;
+                }
                 match result {
                     Ok(state) => {
                         this.teams.error = None;
@@ -52,15 +107,24 @@ impl SettingsWindow {
         if self.teams.busy {
             return;
         }
+        // Changes go where the state came from, even if the main window has
+        // since selected another device.
+        let Some(device) = self.teams.device.clone() else {
+            return;
+        };
         self.teams.busy = true;
         self.teams.notice = None;
+        let id = device.id.clone();
         let task = cx
             .background_executor()
-            .spawn(async move { super::run(Some(&change)) });
+            .spawn(async move { super::run(&device.host, Some(&change)) });
         cx.spawn(async move |this, cx| {
             let result = task.await;
             let _ = this.update(cx, |this, cx| {
                 this.teams.busy = false;
+                if this.teams.device.as_ref().is_none_or(|d| d.id != id) {
+                    return;
+                }
                 match result {
                     Ok(state) => {
                         this.teams.error = None;

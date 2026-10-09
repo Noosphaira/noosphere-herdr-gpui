@@ -200,3 +200,31 @@ fn manage_teams_opens_settings_on_the_teams_section(cx: &mut TestAppContext) {
             .unwrap();
     });
 }
+
+#[gpui::test]
+fn teams_follow_the_main_windows_scriptable_device(cx: &mut TestAppContext) {
+    let source = cx.add_window(crate::sidebar::layout_tests::fixture_window);
+    let weak = cx.update(|cx| source.update(cx, |_, _, cx| cx.weak_entity()).unwrap());
+    let (view, cx) = cx.add_window_view(|_, cx| SettingsWindow::new(weak, cx));
+    let target = |target: herdr_client::ConnectTarget, cx: &mut gpui::VisualTestContext| {
+        source
+            .update(cx, |window, _, _| {
+                window.endpoints[0].connection.target = target
+            })
+            .unwrap();
+        view.read_with(cx, |view, cx| {
+            view.teams_device(cx).map(|d| d.host.is_remote())
+        })
+    };
+    // A custom socket cannot run host scripts, so it cannot be edited.
+    assert_eq!(
+        target(herdr_client::ConnectTarget::Socket("/x.sock".into()), cx),
+        None
+    );
+    assert_eq!(target(herdr_client::ConnectTarget::Local, cx), Some(false));
+    let ssh = herdr_client::ConnectTarget::Ssh {
+        target: "me@devpc".into(),
+        session: "default".into(),
+    };
+    assert_eq!(target(ssh, cx), Some(true));
+}

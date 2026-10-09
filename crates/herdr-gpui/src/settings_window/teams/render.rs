@@ -26,7 +26,23 @@ impl SettingsWindow {
                 }))
             }),
         );
-        let mut page = div().flex().flex_col().gap(px(24.)).child(tabs);
+        let device = self.teams.device.as_ref().map(|d| {
+            let place = if d.host.is_remote() {
+                "over SSH"
+            } else {
+                "this computer"
+            };
+            format!(
+                "Editing {} ({place}). Follows the device selected in the main window.",
+                d.label
+            )
+        });
+        let mut page = div()
+            .flex()
+            .flex_col()
+            .gap(px(24.))
+            .children(device.map(|text| self.control_note(text)))
+            .child(tabs);
         let status = self.teams_status();
         if self.teams.state.is_none() {
             let note = if self.teams.loading {
@@ -471,9 +487,37 @@ impl SettingsWindow {
                 })),
             );
         }
+        // The folder picker only sees this computer, so a remote device's
+        // repositories and folders are typed into the path field instead.
+        let remote = self
+            .teams
+            .device
+            .as_ref()
+            .is_some_and(|d| d.host.is_remote());
         scopes = scopes.child(
-            self.control_choice("teams-scope-add", "+ Repo...", false, true)
-                .on_click(cx.listener(|this, _, _, cx| this.browse_teams_folder(true, cx))),
+            self.control_choice(
+                "teams-scope-add",
+                if remote {
+                    "+ Repo from path below"
+                } else {
+                    "+ Repo..."
+                },
+                false,
+                true,
+            )
+            .on_click(cx.listener(move |this, _, _, cx| {
+                if remote {
+                    let path = this.teams.inputs.access_path.read(cx).text().to_owned();
+                    this.teams.drafts.add_repo(&path);
+                    this.teams
+                        .inputs
+                        .access_path
+                        .update(cx, |i, cx| i.clear(cx));
+                    cx.notify();
+                } else {
+                    this.browse_teams_folder(true, cx);
+                }
+            })),
         );
         let scope_note = match drafts.scope {
             AccessScope::Global => "Every sandboxed agent gets these, in any repo.".to_owned(),
@@ -535,10 +579,14 @@ impl SettingsWindow {
                     .min_w(px(200.))
                     .child(self.teams.inputs.access_path.clone()),
             )
-            .child(
-                self.small_button("teams-grant-browse", "Browse...")
-                    .on_click(cx.listener(|this, _, _, cx| this.browse_teams_folder(false, cx))),
-            )
+            .when(!remote, |row| {
+                row.child(
+                    self.small_button("teams-grant-browse", "Browse...")
+                        .on_click(
+                            cx.listener(|this, _, _, cx| this.browse_teams_folder(false, cx)),
+                        ),
+                )
+            })
             .child(
                 self.small_button("teams-grant-add-ro", "Add read-only")
                     .on_click(cx.listener(|this, _, _, cx| this.add_grant(Mode::ReadOnly, cx))),

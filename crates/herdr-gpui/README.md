@@ -1135,7 +1135,11 @@ lines: Shift+Enter starts a new line, Enter launches.
 ## Teams Settings
 
 **Settings → Teams** (or **Manage teams...** in the Launch team dialog) edits
-what Launch team uses, on this computer:
+what Launch team uses, on the device selected in the main window: this
+computer, or a saved SSH host (over SSH, like Launch team; `herdr-teams` must be
+installed there). Selecting another device reloads it and drops unsaved edits.
+For an SSH host, folders are typed rather than picked, since the folder picker
+only sees this computer.
 
 - **Teams**: name, roles in work order (which is also pane order; reorder with
   the arrows, add from your agents), and how many review rounds later roles
