@@ -204,3 +204,22 @@ fn startup_wait_is_bounded() {
     .unwrap_err();
     assert_eq!(error.kind(), io::ErrorKind::TimedOut);
 }
+
+#[test]
+fn the_server_starts_in_its_own_session_on_linux() {
+    let installed = env::current_exe().unwrap();
+    let command = server_command(&installed);
+    if cfg!(target_os = "linux") && Path::new("/usr/bin/setsid").is_file() {
+        assert_eq!(command.get_program(), "/usr/bin/setsid");
+        let args: Vec<_> = command.get_args().collect();
+        assert_eq!(
+            args,
+            [std::ffi::OsStr::new("--wait"), installed.as_os_str()]
+        );
+    } else {
+        assert_eq!(command.get_program(), installed.as_os_str());
+    }
+    // A missing herdr is started directly, so spawning reports it as missing.
+    let missing = Path::new("/nonexistent/herdr");
+    assert_eq!(server_command(missing).get_program(), missing.as_os_str());
+}
