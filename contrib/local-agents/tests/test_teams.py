@@ -92,6 +92,17 @@ class TeamsTest(unittest.TestCase):
         self.assertEqual((self.teams / "app.yaml").read_text(), before)
         self.assertTrue((self.agents / "coder.md").exists())
 
+    def test_settings_keep_other_keys_and_need_a_real_folder(self):
+        settings = Path(self.home.name) / ".config/herdr-launch/settings.yaml"
+        settings.write_text("other: kept\n")
+        self.assertEqual(self.state()["settings"]["repos_dir"], "~/Repos")
+        bad = self.run_tool("apply", change={"op": "save_settings", "settings": {"repos_dir": "/nonexistent"}})
+        self.assertFalse(bad["ok"])
+        answer = self.run_tool("apply", change={"op": "save_settings", "settings": {"repos_dir": str(self.agents)}})
+        self.assertTrue(answer["ok"], answer)
+        self.assertEqual(answer["state"]["settings"]["repos_dir"], str(self.agents))
+        self.assertIn("other: kept", settings.read_text())
+
     def test_access_refuses_sensitive_folders(self):
         access = self.state()["access"]
         access["global"]["read_write"] = [str(Path(self.home.name) / ".ssh")]

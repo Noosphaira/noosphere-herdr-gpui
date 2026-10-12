@@ -11,6 +11,7 @@ A change is one of:
   {"op": "save_agent",   "agent": {...}, "previous": "<old name or null>"}
   {"op": "delete_agent", "name": "..."}
   {"op": "save_access",  "access": {...}}
+  {"op": "save_settings", "settings": {"repos_dir": "..."}}
 
 Every reply is {"ok": true, "state": {...}} or {"ok": false, "errors": [...]}.
 Nothing is written unless the whole configuration still validates, using the
@@ -35,6 +36,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import herdr_grants  # noqa: E402
 
 TEAMS_DIR = herdr_grants.CONFIG_DIR / "teams"
+SETTINGS = herdr_grants.CONFIG_DIR / "settings.yaml"
+DEFAULT_REPOS_DIR = "~/Repos"
 AGENTS_DIR = Path.home() / ".config/opencode/agents"
 OPENCODE_CONFIG = Path.home() / ".config/opencode/opencode.json"
 NAME = re.compile(r"^[a-z][a-z0-9-]{0,39}$")
@@ -143,6 +146,12 @@ def available_models():
     return sorted(models)
 
 
+def load_settings():
+    data = read_yaml(SETTINGS, {}) or {}
+    data = data if isinstance(data, dict) else {}
+    return {"repos_dir": str(data.get("repos_dir") or DEFAULT_REPOS_DIR)}
+
+
 def load_state():
     teams = [load_team(p) for p in sorted(TEAMS_DIR.glob("*.yaml"))] if TEAMS_DIR.is_dir() else []
     agents = [load_agent(p) for p in sorted(AGENTS_DIR.glob("*.md"))] if AGENTS_DIR.is_dir() else []
@@ -150,11 +159,13 @@ def load_state():
         "teams": teams,
         "agents": agents,
         "access": load_access(),
+        "settings": load_settings(),
         "models": available_models(),
         "paths": {
             "teams": str(TEAMS_DIR),
             "agents": str(AGENTS_DIR),
             "access": str(herdr_grants.CONFIG_DIR),
+            "settings": str(SETTINGS),
         },
     }
 
@@ -349,6 +360,18 @@ def apply(change, state):
             raise Invalid(f"{change['name']} is a role in {', '.join(users)}; remove it there first")
         state["agents"] = [a for a in state["agents"] if a["name"] != change["name"]]
         removes.append(AGENTS_DIR / f"{change['name']}.md")
+    elif op == "save_settings":
+        repos_dir = str(change["settings"].get("repos_dir", "")).strip()
+        if not repos_dir:
+            raise Invalid("the repositories folder is empty")
+        if not herdr_grants.expand(repos_dir).is_dir():
+            raise Invalid(f"{repos_dir} is not a folder on this computer")
+        state["settings"] = {"repos_dir": repos_dir}
+        current = read_yaml(SETTINGS, {}) or {}
+        current = current if isinstance(current, dict) else {}
+        writes[SETTINGS] = "# Launcher settings. Edited with Herdr's Teams settings.\n" + dump(
+            {**current, "repos_dir": repos_dir}
+        )
     elif op == "save_access":
         state["access"] = change["access"]
         global_text, repos_text = access_texts(state["access"])
