@@ -226,7 +226,7 @@ impl HerdrWindow {
                 .id(id)
                 .debug_selector(move || id.into())
                 .flex_none()
-                .size(px(28.))
+                .size(px(34.))
                 .flex()
                 .items_center()
                 .justify_center()
@@ -238,7 +238,7 @@ impl HerdrWindow {
                 .child(
                     svg()
                         .path(icon)
-                        .size(px(15.))
+                        .size(px(20.))
                         .text_color(rgb(theme.foreground)),
                 )
         };
@@ -327,7 +327,6 @@ impl HerdrWindow {
                             })),
                     ),
             )
-            .children(self.render_github_picker(cx))
             .into_any_element();
 
         let teams: AnyElement = match &launch.teams {

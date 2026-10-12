@@ -5,7 +5,7 @@
 //! the GitHub CLI signed in there (`contrib/local-agents`), so the folder and
 //! the clone are on the machine the team launches on.
 
-use crate::{HerdrWindow, search_input::SearchInput, teleport::Host};
+use crate::{HerdrWindow, fonts::StyledFont, search_input::SearchInput, teleport::Host};
 use gpui::{prelude::*, *};
 use herdr_client::shell_quote;
 use serde::Deserialize;
@@ -288,28 +288,35 @@ impl HerdrWindow {
         changed
     }
 
-    pub(crate) fn render_github_picker(&self, cx: &mut Context<Self>) -> Option<Div> {
+    /// The picker as a panel beside the Launch team dialog: a header, the
+    /// search, and a list that fills the rest and takes the scroll wheel.
+    pub(crate) fn render_github_panel(
+        &self,
+        window: &Window,
+        cx: &mut Context<Self>,
+    ) -> Option<Stateful<Div>> {
         let picker = self.launch_team.as_ref()?.github.as_ref()?;
         let theme = &self.theme;
+        let font = &self.config.ui;
+        let viewport = window.viewport_size();
         let muted = rgb(theme.muted);
         let danger = crate::menu::danger(theme);
         let line = |text: String| div().min_w_0().child(text);
-        let mut panel = div()
-            .debug_selector(|| "launch-team-github".into())
+        let mut body = div()
             .flex()
             .flex_col()
-            .gap(px(6.))
-            .p(px(8.))
-            .rounded(px(crate::config::corners::CONTROL))
-            .border_1()
-            .border_color(rgb(theme.active))
+            .flex_1()
+            .min_h_0()
+            .gap(px(8.))
+            .px(px(12.))
+            .py(px(10.))
             .child(picker.search.clone());
         match &picker.state {
             State::Loading => {
-                panel = panel.child(line("Loading your repositories...".into()).text_color(muted));
+                body = body.child(line("Loading your repositories...".into()).text_color(muted));
             }
             State::Failed(error) => {
-                panel = panel.child(
+                body = body.child(
                     line(error.clone())
                         .debug_selector(|| "launch-team-github-error".into())
                         .text_color(danger),
@@ -321,10 +328,15 @@ impl HerdrWindow {
                 let total = matches.len();
                 let mut rows = div()
                     .id("launch-team-github-list")
+                    .debug_selector(|| "launch-team-github-list".into())
                     .flex()
                     .flex_col()
-                    .max_h(px(self.config.ui.line_height() * 9.))
-                    .overflow_y_scroll();
+                    .flex_1()
+                    .min_h_0()
+                    .overflow_y_scroll()
+                    // The wheel over the list scrolls the list, never the
+                    // dialog behind it.
+                    .on_scroll_wheel(|_, _, cx| cx.stop_propagation());
                 for (index, repo) in matches.into_iter().take(SHOWN).enumerate() {
                     let pick = repo.clone();
                     let busy = picker.ensuring.as_deref() == Some(repo.full_name.as_str());
@@ -342,10 +354,11 @@ impl HerdrWindow {
                             .id(("launch-team-github-repo", index))
                             .debug_selector(move || format!("launch-team-github-repo-{index}"))
                             .flex()
+                            .flex_none()
                             .items_center()
                             .gap(px(8.))
-                            .px(px(6.))
-                            .py(px(3.))
+                            .px(px(8.))
+                            .py(px(5.))
                             .rounded(px(crate::config::corners::CONTROL))
                             .when(picker.ensuring.is_none(), |row| {
                                 row.cursor_pointer().hover(|row| row.bg(rgb(theme.active)))
@@ -371,20 +384,81 @@ impl HerdrWindow {
                     n if n > SHOWN => format!("{SHOWN} of {n} shown; search to narrow."),
                     _ => format!("Not cloned yet goes to {}.", listing.repos_dir),
                 };
-                panel = panel.child(rows).child(line(note).text_color(muted));
+                body = body.child(rows).child(line(note).text_color(muted));
             }
         }
         if let Some(name) = &picker.ensuring {
-            panel = panel.child(line(format!("Cloning {name}...")).text_color(muted));
+            body = body.child(line(format!("Cloning {name}...")).text_color(muted));
         }
         if let Some(error) = &picker.error {
-            panel = panel.child(
+            body = body.child(
                 line(error.clone())
                     .debug_selector(|| "launch-team-github-error".into())
                     .text_color(danger),
             );
         }
-        Some(panel)
+        let header = div()
+            .flex()
+            .flex_none()
+            .items_center()
+            .gap(px(10.))
+            .px(px(12.))
+            .py(px(10.))
+            .border_b_1()
+            .border_color(rgb(theme.active))
+            .child(
+                svg()
+                    .path("icons/github.svg")
+                    .size(px(16.))
+                    .flex_none()
+                    .text_color(muted),
+            )
+            .child(
+                div()
+                    .flex_1()
+                    .font_weight(FontWeight::SEMIBOLD)
+                    .child("Your GitHub repositories"),
+            )
+            .child(
+                div()
+                    .id("launch-team-github-close")
+                    .debug_selector(|| "launch-team-github-close".into())
+                    .flex_none()
+                    .px(px(6.))
+                    .rounded(px(crate::config::corners::CONTROL))
+                    .cursor_pointer()
+                    .hover(|close| close.bg(rgb(theme.active)))
+                    .child("×")
+                    .on_click(cx.listener(|this, _, window, cx| {
+                        cx.stop_propagation();
+                        this.toggle_github_picker(window, cx);
+                    })),
+            );
+        Some(
+            div()
+                .id("launch-team-github")
+                .debug_selector(|| "launch-team-github".into())
+                .flex()
+                .flex_col()
+                .w(px(360. * (font.size / 12.)).min((viewport.width / 3.).max(px(240.))))
+                .h(px(520. * (font.size / 12.)).min((viewport.height - px(32.)).max(px(0.))))
+                .overflow_hidden()
+                .rounded(px(crate::config::corners::PANEL))
+                .border_1()
+                .border_color(rgb(theme.active))
+                .bg(rgb(theme.surface))
+                .text_color(rgb(theme.foreground))
+                .text_font(font)
+                .text_size(px(font.size))
+                .line_height(px(font.line_height()))
+                .shadow_lg()
+                .occlude()
+                .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
+                .on_mouse_down(MouseButton::Right, |_, _, cx| cx.stop_propagation())
+                .on_click(|_, _, cx| cx.stop_propagation())
+                .child(header)
+                .child(body),
+        )
     }
 }
 

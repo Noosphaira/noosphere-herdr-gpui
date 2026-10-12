@@ -8,7 +8,7 @@
 //! and Teleport do), and follows the workspace it created.
 
 mod error;
-mod github;
+pub(crate) mod github;
 mod job;
 mod state;
 mod ui;
