@@ -757,6 +757,17 @@ impl HerdrWindow {
                     .snap_to_window_with_margin(Edges::all(px(12.)))
                     .child(panel)
                     .into_any_element()
+            } else if page == Page::LaunchTeam
+                && let Some(github) = self.render_github_panel(window, cx)
+            {
+                // The GitHub picker extends the Launch team dialog rightward.
+                div()
+                    .flex()
+                    .items_start()
+                    .gap(px(12.))
+                    .child(panel)
+                    .child(github)
+                    .into_any_element()
             } else {
                 panel.into_any_element()
             })

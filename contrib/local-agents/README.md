@@ -52,6 +52,21 @@ Unknown keys in team and agent files are kept; YAML comments are not.
 Renaming an agent updates every team that uses it; deleting one that a team
 uses is refused.
 
+## Picking repositories from GitHub
+
+The Launch team dialog's GitHub button runs `herdr-repos` on the host:
+
+```
+herdr-repos list              # your repositories, with any local checkout
+herdr-repos ensure OWNER/NAME # the checkout's path, cloned first if needed
+```
+
+It uses the GitHub CLI (`gh`) signed in on that host. Checkouts live in
+`repos_dir` from `~/.config/herdr-launch/settings.yaml` (default `~/Repos`,
+editable in Settings → Teams); a folder counts as the repository when its
+`origin` remote points at it on GitHub. New clones go to `<repos_dir>/<name>`,
+or `<repos_dir>/<owner>-<name>` if that name is taken.
+
 ## Teamwork
 
 The team file's `flow` sets who works when. The launcher gives the task to the

@@ -1,0 +1,3 @@
+# Launcher settings. Edited with Herdr's Teams settings.
+# Folder where GitHub repositories picked in Launch team are found or cloned.
+repos_dir: ~/Repos

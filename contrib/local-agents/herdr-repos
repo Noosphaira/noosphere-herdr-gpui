@@ -1,0 +1,152 @@
+#!/usr/bin/env python3
+"""Find or clone a GitHub repository in the repositories folder. For the GUI.
+
+  herdr-repos list              your GitHub repositories as JSON, each with
+                                the local checkout in the repositories folder,
+                                if there is one
+  herdr-repos ensure OWNER/NAME print the local checkout's path, cloning the
+                                repository into the folder first if needed
+
+Every reply is one JSON line: {"ok": true, ...} or {"ok": false, "error": "..."}.
+
+The repositories folder is `repos_dir` in ~/.config/herdr-launch/settings.yaml
+(default ~/Repos). A checkout counts as the repository when its `origin`
+remote points at it on GitHub, whatever the folder is called. A new clone goes
+to <folder>/<name>, or <folder>/<owner>-<name> if that name is taken.
+
+GitHub access goes through the GitHub CLI (`gh`), signed in on this computer.
+"""
+
+import json
+import re
+import shutil
+import subprocess
+import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import herdr_grants  # noqa: E402
+
+SETTINGS = herdr_grants.CONFIG_DIR / "settings.yaml"
+DEFAULT_REPOS_DIR = "~/Repos"
+FULL_NAME = re.compile(r"^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$")
+# git@github.com:owner/name(.git), ssh://git@github.com/owner/name, https://github.com/owner/name
+GITHUB_URL = re.compile(r"github\.com[:/]+([A-Za-z0-9_.-]+)/([A-Za-z0-9_.-]+?)(?:\.git)?/?$")
+
+
+class Failed(Exception):
+    pass
+
+
+def repos_dir():
+    settings = herdr_grants.read_yaml(SETTINGS, {}) or {}
+    raw = settings.get("repos_dir") if isinstance(settings, dict) else None
+    folder = herdr_grants.expand(raw or DEFAULT_REPOS_DIR)
+    if not folder.is_dir():
+        raise Failed(f"The repositories folder {folder} does not exist; set it in Settings > Teams")
+    return folder
+
+
+def gh(*args):
+    if not shutil.which("gh"):
+        raise Failed("The GitHub CLI (gh) is not installed on this computer")
+    result = subprocess.run(["gh", *args], capture_output=True, text=True)
+    if result.returncode != 0:
+        message = result.stderr.strip() or result.stdout.strip()
+        if "auth login" in message or "not logged" in message.lower():
+            raise Failed("The GitHub CLI is not signed in on this computer: run `gh auth login`")
+        raise Failed(f"gh {args[0]} failed: {message[-400:]}")
+    return result.stdout
+
+
+def origin(path):
+    result = subprocess.run(
+        ["git", "-C", str(path), "remote", "get-url", "origin"], capture_output=True, text=True
+    )
+    match = GITHUB_URL.search(result.stdout.strip()) if result.returncode == 0 else None
+    return f"{match[1]}/{match[2]}".lower() if match else None
+
+
+def local_checkouts(folder):
+    """GitHub full name (lowercase) -> checkout path, one level deep."""
+    found = {}
+    for child in sorted(folder.iterdir()):
+        if child.is_dir() and (child / ".git").exists():
+            name = origin(child)
+            if name and name not in found:
+                found[name] = str(child)
+    return found
+
+
+def list_repos():
+    folder = repos_dir()
+    raw = gh(
+        "api", "--paginate",
+        "user/repos?per_page=100&sort=pushed&affiliation=owner,collaborator,organization_member",
+    )
+    # --paginate concatenates one JSON array per page.
+    repos = []
+    decoder = json.JSONDecoder()
+    position = 0
+    while position < len(raw):
+        while position < len(raw) and raw[position].isspace():
+            position += 1
+        if position >= len(raw):
+            break
+        page, position = decoder.raw_decode(raw, position)
+        repos.extend(page)
+    local = local_checkouts(folder)
+    return {
+        "repos_dir": str(folder),
+        "repos": [
+            {
+                "full_name": repo["full_name"],
+                "description": repo.get("description") or "",
+                "private": bool(repo.get("private")),
+                "pushed_at": repo.get("pushed_at") or "",
+                "local": local.get(repo["full_name"].lower()),
+            }
+            for repo in repos
+        ],
+    }
+
+
+def ensure(full_name):
+    if not FULL_NAME.match(full_name) or any(part in (".", "..") for part in full_name.split("/")):
+        raise Failed(f"{full_name!r} is not an OWNER/NAME repository")
+    folder = repos_dir()
+    existing = local_checkouts(folder).get(full_name.lower())
+    if existing:
+        return {"path": existing, "cloned": False}
+    owner, name = full_name.split("/")
+    target = next(
+        (candidate for candidate in (folder / name, folder / f"{owner}-{name}") if not candidate.exists()),
+        None,
+    )
+    if target is None:
+        raise Failed(f"{folder / name} and {folder / f'{owner}-{name}'} already exist but are other repositories")
+    print(f"cloning {full_name} into {target}", file=sys.stderr, flush=True)
+    # git's progress goes to stderr, which keeps the GUI's script alive.
+    result = subprocess.run(["gh", "repo", "clone", full_name, str(target), "--", "--progress"],
+                            stdout=sys.stderr, stderr=sys.stderr)
+    if result.returncode != 0 or not (target / ".git").exists():
+        raise Failed(f"cloning {full_name} into {target} failed")
+    return {"path": str(target), "cloned": True}
+
+
+def main():
+    args = sys.argv[1:]
+    try:
+        if args == ["list"]:
+            reply = list_repos()
+        elif len(args) == 2 and args[0] == "ensure":
+            reply = ensure(args[1])
+        else:
+            sys.exit(__doc__.strip())
+        print(json.dumps({"ok": True, **reply}))
+    except (Failed, herdr_grants.GrantError, OSError, ValueError, KeyError) as error:
+        print(json.dumps({"ok": False, "error": str(error)}))
+
+
+if __name__ == "__main__":
+    main()
