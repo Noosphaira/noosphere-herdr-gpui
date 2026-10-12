@@ -105,6 +105,8 @@ pub(crate) struct LaunchTeam {
     pub(crate) path: Entity<SearchInput>,
     pub(crate) branch: Entity<SearchInput>,
     pub(crate) task: Entity<MultilineInput>,
+    /// The GitHub repository picker, while it is open.
+    pub(crate) github: Option<super::github::Picker>,
     pub(crate) error: Option<Error>,
     sender: mpsc::Sender<Event>,
     events: mpsc::Receiver<Event>,
@@ -150,6 +152,7 @@ impl LaunchTeam {
             path,
             branch,
             task,
+            github: None,
             error: None,
             sender,
             events,

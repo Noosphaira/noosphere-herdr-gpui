@@ -7,11 +7,20 @@ use super::{
 use crate::settings_window::SettingsWindow;
 use gpui::{prelude::*, *};
 
+/// What a picked folder fills in.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum PickFor {
+    Repo,
+    Grant,
+    ReposDir,
+}
+
 /// What to select once a change has been saved.
 pub(super) enum After {
     Team(Option<String>),
     Agent(Option<String>),
     Access,
+    Settings,
 }
 
 impl SettingsWindow {
@@ -155,6 +164,7 @@ impl SettingsWindow {
             Some(After::Team(name)) => self.select_team(name.map(Selected::Saved), cx),
             Some(After::Agent(name)) => self.select_agent(name.map(Selected::Saved), cx),
             Some(After::Access) => self.reset_access(),
+            Some(After::Settings) => self.reset_teams_settings(cx),
             None => {
                 let keep_team = self.teams.team.clone().filter(|s| self.exists_team(s));
                 let keep_agent = self.teams.agent.clone().filter(|s| self.exists_agent(s));
@@ -166,6 +176,7 @@ impl SettingsWindow {
                 }
                 if first_load {
                     self.reset_access();
+                    self.reset_teams_settings(cx);
                 }
             }
         }
@@ -258,6 +269,53 @@ impl SettingsWindow {
         self.teams.agent = selected;
         self.teams.confirm_delete = false;
         cx.notify();
+    }
+
+    /// Put the saved repositories folder back into its field.
+    pub(super) fn reset_teams_settings(&mut self, cx: &mut Context<Self>) {
+        let folder = self
+            .teams
+            .state
+            .as_ref()
+            .map(|s| s.settings.repos_dir.clone())
+            .unwrap_or_default();
+        self.teams
+            .inputs
+            .repos_dir
+            .update(cx, |input, cx| input.set_text(&folder, cx));
+    }
+
+    pub(super) fn settings_dirty(&self, cx: &App) -> bool {
+        let typed = self
+            .teams
+            .inputs
+            .repos_dir
+            .read(cx)
+            .text()
+            .trim()
+            .to_owned();
+        self.teams
+            .state
+            .as_ref()
+            .is_some_and(|s| s.settings.repos_dir != typed)
+    }
+
+    pub(super) fn save_teams_settings(&mut self, cx: &mut Context<Self>) {
+        let repos_dir = self
+            .teams
+            .inputs
+            .repos_dir
+            .read(cx)
+            .text()
+            .trim()
+            .to_owned();
+        self.apply_teams_change(
+            Change::SaveSettings {
+                settings: super::Settings { repos_dir },
+            },
+            After::Settings,
+            cx,
+        );
     }
 
     pub(super) fn reset_access(&mut self) {
@@ -371,16 +429,15 @@ impl SettingsWindow {
 
     /// Pick a folder with the desktop's file chooser: a repository to add
     /// grants for, or a folder to grant.
-    pub(super) fn browse_teams_folder(&mut self, repo: bool, cx: &mut Context<Self>) {
+    pub(super) fn browse_teams_folder(&mut self, target: PickFor, cx: &mut Context<Self>) {
         let picked = cx.prompt_for_paths(PathPromptOptions {
             files: false,
             directories: true,
             multiple: false,
             prompt: Some(
-                if repo {
-                    "Choose repository"
-                } else {
-                    "Choose folder"
+                match target {
+                    PickFor::Repo => "Choose repository",
+                    PickFor::Grant | PickFor::ReposDir => "Choose folder",
                 }
                 .into(),
             ),
@@ -394,13 +451,18 @@ impl SettingsWindow {
             };
             let text = path.to_string_lossy().into_owned();
             let _ = this.update(cx, |this, cx| {
-                if repo {
-                    this.teams.drafts.add_repo(&text);
-                } else {
-                    this.teams
+                match target {
+                    PickFor::Repo => this.teams.drafts.add_repo(&text),
+                    PickFor::Grant => this
+                        .teams
                         .inputs
                         .access_path
-                        .update(cx, |i, cx| i.set_text(&text, cx));
+                        .update(cx, |i, cx| i.set_text(&text, cx)),
+                    PickFor::ReposDir => this
+                        .teams
+                        .inputs
+                        .repos_dir
+                        .update(cx, |i, cx| i.set_text(&text, cx)),
                 }
                 cx.notify();
             });

@@ -15,6 +15,9 @@ use gpui::{prelude::*, *};
 impl HerdrWindow {
     pub(crate) fn poll_launch_team(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let open = self.menu.page == Some(Page::LaunchTeam);
+        if open && self.poll_github_picker(cx) {
+            cx.notify();
+        }
         let Some(launch) = &mut self.launch_team else {
             return;
         };
@@ -68,7 +71,11 @@ impl HerdrWindow {
         };
         let composing = launch.path.read(cx).is_composing()
             || launch.branch.read(cx).is_composing()
-            || launch.task.read(cx).is_composing();
+            || launch.task.read(cx).is_composing()
+            || launch
+                .github
+                .as_ref()
+                .is_some_and(|picker| picker.search.read(cx).is_composing());
         // The fields edit themselves; only these keys belong to the dialog.
         if composing || !matches!(event.keystroke.key.as_str(), "escape" | "enter" | "tab") {
             return;
@@ -213,6 +220,28 @@ impl HerdrWindow {
                 .child(div().flex_1().min_w_0().child(field))
         };
 
+        // Square buttons beside the path: a folder picker and GitHub.
+        let icon_button = |id: &'static str, icon: &'static str| {
+            div()
+                .id(id)
+                .debug_selector(move || id.into())
+                .flex_none()
+                .size(px(28.))
+                .flex()
+                .items_center()
+                .justify_center()
+                .rounded(px(crate::config::corners::CONTROL))
+                .border_1()
+                .border_color(rgb(theme.active))
+                .cursor_pointer()
+                .hover(|button| button.bg(rgb(theme.active)))
+                .child(
+                    svg()
+                        .path(icon)
+                        .size(px(15.))
+                        .text_color(rgb(theme.foreground)),
+                )
+        };
         let chip = |id: &'static str, index: usize, label: String, picked: bool| {
             div()
                 .id((id, index))
@@ -279,15 +308,26 @@ impl HerdrWindow {
                     )
                     .when(!launch.origin.host.is_remote(), |field| {
                         field.child(
-                            chip("launch-team-browse", 0, "Browse...".into(), false).on_click(
+                            icon_button("launch-team-browse", "icons/folder.svg").on_click(
                                 cx.listener(|this, _, _, cx| {
                                     cx.stop_propagation();
                                     this.browse_launch_team_repo(cx);
                                 }),
                             ),
                         )
-                    }),
+                    })
+                    .child(
+                        icon_button("launch-team-github", "icons/github.svg")
+                            .when(launch.github.is_some(), |button| {
+                                button.bg(rgb(theme.active))
+                            })
+                            .on_click(cx.listener(|this, _, window, cx| {
+                                cx.stop_propagation();
+                                this.toggle_github_picker(window, cx);
+                            })),
+                    ),
             )
+            .children(self.render_github_picker(cx))
             .into_any_element();
 
         let teams: AnyElement = match &launch.teams {

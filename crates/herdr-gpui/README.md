@@ -1117,8 +1117,13 @@ The **Launch team** button at the top of the sidebar, above Spaces (also **Launc
 command palette, `cmd-shift-l`, and **Launch team...** in a Git workspace's
 right-click menu) starts one sandboxed OpenCode agent per role of a team on a
 new worktree, and gives each the same task. Pick one of the repositories open
-on the host, choose any other repository folder with **Browse...** (on this
-machine), or type its path (on any host; it need not be open in Herdr); the
+on the host, choose any other repository folder with the folder button (on
+this machine), pick one of your GitHub repositories with the GitHub button, or
+type its path (on any host; it need not be open in Herdr). The GitHub button
+lists your repositories through the GitHub CLI signed in on the host (`gh auth
+login`), and uses the checkout in the repositories folder set in
+**Settings → Teams** (one whose `origin` is that repository), cloning it there
+first if there is none; the
 right-clicked or focused workspace's repository is picked for you, and a
 linked checkout's branch becomes the base. Then pick a team, name the branch,
 describe the task, and press Enter (Tab moves between the fields). The dialog
@@ -1146,6 +1151,8 @@ only sees this computer.
   may send work back.
 - **Agents**: name, description, model (from OpenCode's configured models),
   thinking on or off, temperature, step limit, and the prompt.
+- **Repositories folder** (on the Folder access tab): where the Launch team
+  GitHub button finds or clones repositories.
 - **Folder access**: folders every sandboxed agent gets, and extra folders per
   repository, each read-only or read-write; **Browse...** uses the desktop's
   folder picker.

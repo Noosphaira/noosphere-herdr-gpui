@@ -39,6 +39,9 @@ fn state() -> State {
             },
             repos: Vec::new(),
         },
+        settings: Settings {
+            repos_dir: "~/Repos".into(),
+        },
         models: vec!["spark/big".into(), "spark/fast".into()],
         paths: Paths::default(),
     }
@@ -169,6 +172,15 @@ fn editing_a_team_marks_it_unsaved_until_reverted(cx: &mut TestAppContext) {
             assert!(!view.access_dirty());
             view.teams.drafts.grant("~/assets", Mode::ReadOnly);
             assert!(view.access_dirty());
+            // The repositories folder is loaded into its field, and an edit
+            // there is unsaved until saved.
+            assert_eq!(view.teams.inputs.repos_dir.read(cx).text(), "~/Repos");
+            assert!(!view.settings_dirty(cx));
+            view.teams
+                .inputs
+                .repos_dir
+                .update(cx, |input, cx| input.set_text("/mnt/General/Repos", cx));
+            assert!(view.settings_dirty(cx));
             view.teams.tab = Tab::Agents;
             view.select_agent(Some(Selected::Saved("coder".into())), cx);
             assert!(!view.agent_dirty(cx));
@@ -182,6 +194,7 @@ fn editing_a_team_marks_it_unsaved_until_reverted(cx: &mut TestAppContext) {
         }
     });
     assert!(cx.debug_bounds("teams-access-save").is_some());
+    assert!(cx.debug_bounds("teams-repos-dir-save").is_some());
 }
 
 #[gpui::test]

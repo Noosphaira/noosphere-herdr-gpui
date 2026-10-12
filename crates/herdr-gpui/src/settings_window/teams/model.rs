@@ -68,6 +68,14 @@ pub(in crate::settings_window) struct Access {
     pub(in crate::settings_window) repos: Vec<RepoGrants>,
 }
 
+/// Launcher settings (`~/.config/herdr-launch/settings.yaml`).
+#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
+pub(in crate::settings_window) struct Settings {
+    /// Where GitHub repositories picked in Launch team are found or cloned.
+    #[serde(default)]
+    pub(in crate::settings_window) repos_dir: String,
+}
+
 #[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
 pub(in crate::settings_window) struct Paths {
     #[serde(default)]
@@ -76,6 +84,8 @@ pub(in crate::settings_window) struct Paths {
     pub(in crate::settings_window) agents: String,
     #[serde(default)]
     pub(in crate::settings_window) access: String,
+    #[serde(default)]
+    pub(in crate::settings_window) settings: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
@@ -83,6 +93,8 @@ pub(in crate::settings_window) struct State {
     pub(in crate::settings_window) teams: Vec<Team>,
     pub(in crate::settings_window) agents: Vec<Agent>,
     pub(in crate::settings_window) access: Access,
+    #[serde(default)]
+    pub(in crate::settings_window) settings: Settings,
     #[serde(default)]
     pub(in crate::settings_window) models: Vec<String>,
     #[serde(default)]
@@ -109,6 +121,9 @@ pub(in crate::settings_window) enum Change {
     },
     SaveAccess {
         access: Access,
+    },
+    SaveSettings {
+        settings: Settings,
     },
 }
 

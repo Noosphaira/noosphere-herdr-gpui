@@ -195,6 +195,7 @@ impl SettingsWindow {
             &inputs.agent_temperature,
             &inputs.agent_steps,
             &inputs.access_path,
+            &inputs.repos_dir,
         ] {
             input.update(cx, |input, cx| {
                 input.set_appearance(self.config.ui.clone(), self.theme.clone(), cx);

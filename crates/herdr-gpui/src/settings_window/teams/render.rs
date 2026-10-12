@@ -1,6 +1,10 @@
 //! Drawing the Teams section: one tab each for teams, agents, and folder access.
 
-use super::{AccessScope, Change, Selected, Tab, drafts::Mode, ui::After};
+use super::{
+    AccessScope, Change, Selected, Tab,
+    drafts::Mode,
+    ui::{After, PickFor},
+};
 use crate::{config::corners, settings_window::SettingsWindow};
 use gpui::{prelude::*, *};
 
@@ -60,7 +64,9 @@ impl SettingsWindow {
             Tab::Agents => page
                 .child(self.render_agent_list(cx))
                 .children(self.render_agent_editor(cx)),
-            Tab::Access => page.child(self.render_access(cx)),
+            Tab::Access => page
+                .child(self.render_repos_dir(cx))
+                .child(self.render_access(cx)),
         }
         .child(self.control_note(format!("Files: {}", self.teams_files())))
     }
@@ -515,7 +521,7 @@ impl SettingsWindow {
                         .update(cx, |i, cx| i.clear(cx));
                     cx.notify();
                 } else {
-                    this.browse_teams_folder(true, cx);
+                    this.browse_teams_folder(PickFor::Repo, cx);
                 }
             })),
         );
@@ -582,9 +588,9 @@ impl SettingsWindow {
             .when(!remote, |row| {
                 row.child(
                     self.small_button("teams-grant-browse", "Browse...")
-                        .on_click(
-                            cx.listener(|this, _, _, cx| this.browse_teams_folder(false, cx)),
-                        ),
+                        .on_click(cx.listener(|this, _, _, cx| {
+                            this.browse_teams_folder(PickFor::Grant, cx)
+                        })),
                 )
             })
             .child(
@@ -644,5 +650,45 @@ impl SettingsWindow {
                  read-write also refuses OpenCode's settings, ~/.local/bin, and folders containing a git repository.",
             ))
             .child(actions)
+    }
+
+    /// Where Launch team's GitHub picker finds or clones repositories.
+    fn render_repos_dir(&self, cx: &mut Context<Self>) -> Div {
+        let remote = self
+            .teams
+            .device
+            .as_ref()
+            .is_some_and(|d| d.host.is_remote());
+        let dirty = self.settings_dirty(cx);
+        let field = div()
+            .flex()
+            .items_center()
+            .gap(px(8.))
+            .child(
+                div()
+                    .flex_1()
+                    .min_w(px(200.))
+                    .child(self.teams.inputs.repos_dir.clone()),
+            )
+            .when(!remote, |row| {
+                row.child(
+                    self.small_button("teams-repos-dir-browse", "Browse...")
+                        .on_click(cx.listener(|this, _, _, cx| {
+                            this.browse_teams_folder(PickFor::ReposDir, cx)
+                        })),
+                )
+            })
+            .child(
+                self.teams_button("teams-repos-dir-save", "Save", true, dirty)
+                    .when(dirty, |b| {
+                        b.on_click(cx.listener(|this, _, _, cx| this.save_teams_settings(cx)))
+                    }),
+            );
+        self.control_card("Repositories folder")
+            .child(field)
+            .child(self.control_note(
+                "Launch team's GitHub button uses the checkout here when there is one, \
+                 and clones into it otherwise.",
+            ))
     }
 }

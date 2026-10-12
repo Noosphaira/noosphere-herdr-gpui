@@ -15,7 +15,7 @@ mod render;
 mod ui;
 
 pub(super) use drafts::{AccessScope, Drafts};
-pub(super) use model::{Agent, Change, State, Team};
+pub(super) use model::{Agent, Change, Settings, State, Team};
 
 use crate::{multiline_input::MultilineInput, search_input::SearchInput, teleport::Host};
 use gpui::{AppContext, Context, Entity};
@@ -73,6 +73,7 @@ pub(super) struct Inputs {
     pub(super) agent_steps: Entity<SearchInput>,
     pub(super) agent_prompt: Entity<MultilineInput>,
     pub(super) access_path: Entity<SearchInput>,
+    pub(super) repos_dir: Entity<SearchInput>,
 }
 
 pub(super) struct TeamsEditor {
@@ -124,6 +125,7 @@ impl TeamsEditor {
                 agent_steps: field("No limit", cx),
                 agent_prompt: prompt,
                 access_path: field("A folder on this computer, e.g. ~/design-assets", cx),
+                repos_dir: field("e.g. ~/Repos", cx),
             },
         }
     }
