@@ -381,7 +381,7 @@ impl HerdrWindow {
                 }
                 let note = match total {
                     0 => "No repository matches.".to_owned(),
-                    n if n > SHOWN => format!("{SHOWN} of {n} shown; search to narrow."),
+                    n if n > SHOWN => format!("{SHOWN} of {n} shown."),
                     _ => format!("Not cloned yet goes to {}.", listing.repos_dir),
                 };
                 body = body.child(rows).child(line(note).text_color(muted));

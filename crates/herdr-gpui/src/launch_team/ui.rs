@@ -373,10 +373,6 @@ impl HerdrWindow {
         let branch_text = launch.branch.read(cx).text().to_owned();
         let task_text = launch.task.read(cx).text().to_owned();
         let not_ready = launch.not_ready(&path_text, &branch_text, &task_text);
-        let base = launch
-            .target(&path_text)
-            .and_then(|(_, base)| base)
-            .unwrap_or("HEAD");
         let mut body = div()
             .flex()
             .flex_col()
@@ -430,13 +426,7 @@ impl HerdrWindow {
                             .child("Shift+Enter for a new line"),
                     )
                     .into_any_element(),
-            ))
-            .child(
-                line(format!(
-                    "Creates the branch from {base} in a new worktree, then starts one sandboxed agent per role and gives each the task."
-                ))
-                .text_color(muted),
-            );
+            ));
         if launch.stage == Stage::Launching {
             body = body
                 .child(progress::bar(
