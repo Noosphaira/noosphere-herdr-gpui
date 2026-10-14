@@ -17,6 +17,11 @@ inside every sandbox, e.g. where to send traces. Values may use {agent},
       OPIK_URL: http://127.0.0.1:5173/api
       OPIK_PROJECT_NAME: teams-{agent}
 
+The agent runs in the systemd user slice herdr-agents.slice, where a root
+nftables service on the host limits where it may connect (see
+herdr_netfilter.py). Unless settings.yaml says `network_filter: off`, no
+agent starts while that filter is not active.
+
 herdr's control socket is never bound in. Anything that can write to it can
 run commands in any pane, outside the sandbox. Instead, a filter socket is
 bound in (see herdr_filter.py): it forwards this pane's agent-state reports
@@ -35,6 +40,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import herdr_agents  # noqa: E402
 import herdr_filter  # noqa: E402
 import herdr_grants  # noqa: E402
+import herdr_netfilter  # noqa: E402
 import herdr_team  # noqa: E402
 
 LAUNCH_DIR = Path(__file__).resolve().parent
@@ -210,6 +216,13 @@ def main():
     except herdr_grants.GrantError as error:
         die(str(error))
 
+    try:
+        filtered = herdr_netfilter.mode(herdr_grants.read_yaml(SETTINGS, {})) == "required"
+    except ValueError as error:
+        die(f"{SETTINGS}: {error}")
+    if filtered and (reason := herdr_netfilter.problem()):
+        die(f"refusing to start an agent without its network filter: {reason}")
+
     upstream = os.environ.get("HERDR_SOCKET_PATH")
     pane_id = os.environ.get("HERDR_PANE_ID")
     filter_dir = None
@@ -226,7 +239,10 @@ def main():
         branch = herdr_team.load(team_dir).get("branch")
         candidate = Path(team_dir) / "prompts" / f"{role}.md"
         prompt = candidate if candidate.is_file() else None
-    child = subprocess.Popen(build_bwrap(worktree, common_git, grants, command, filter_dir, role, branch, prompt))
+    bwrap = build_bwrap(worktree, common_git, grants, command, filter_dir, role, branch, prompt)
+    if filtered:
+        bwrap = herdr_netfilter.wrap(bwrap)
+    child = subprocess.Popen(bwrap)
     # The terminal delivers Ctrl-C and friends to the whole foreground group,
     # so the child sees them directly. Ignore them here and wait for it.
     for sig in (signal.SIGINT, signal.SIGQUIT, signal.SIGTSTP):

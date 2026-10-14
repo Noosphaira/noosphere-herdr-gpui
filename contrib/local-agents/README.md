@@ -42,8 +42,21 @@ filled in. Both agents run with their update checks and telemetry off (see
 - Pi: a tmpfs at `~/.pi/agent` with each entry bound read-only on top (Pi
   writes lock files beside its config), `sessions/` read-write, and the
   folder Pi is installed in, read-only.
-- `/usr` and a minimal `/etc`; granted folders; the network.
+- `/usr` and a minimal `/etc`; granted folders; the network, as far as the
+  host's filter allows (below).
 - Its own PID namespace: it cannot see your other processes.
+
+Network: herdr-sandbox starts every agent in the systemd user slice
+`herdr-agents.slice` (installed by `install.sh`, with
+`herdr-agents-anchor.service` keeping its cgroup in place). A root service on
+the host matches that cgroup in nftables and decides where agents may
+connect, and writes the cgroup id it loaded to
+`/run/herdr-agents-net/cgroup-id`. herdr-sandbox refuses to start an agent
+when that file is missing or names an older cgroup, so a stale filter never
+means an unfiltered agent. `network_filter: off` in `settings.yaml` turns the
+check off on hosts without such a service. The rules themselves are
+site-specific (which hosts and ports agents need) and are not part of this
+repository; `herdr_netfilter.py` describes the contract.
 
 The rest of the home directory is an empty tmpfs. herdr's control socket is
 never bound in: whoever can write to it can run commands in any pane. A filter
