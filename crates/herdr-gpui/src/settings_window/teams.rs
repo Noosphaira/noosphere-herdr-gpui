@@ -1,5 +1,5 @@
-//! The Teams section: edit the teams `herdr-launch` starts, the OpenCode
-//! agents that fill their roles, and the folders sandboxed agents may reach.
+//! The Teams section: edit the teams `herdr-launch` starts, the agent roles
+//! (Pi or OpenCode) that fill them, and the folders sandboxed agents may reach.
 //!
 //! The files are owned by the `herdr-teams` script (`contrib/local-agents`),
 //! which loads them as JSON and applies one validated change at a time, with
