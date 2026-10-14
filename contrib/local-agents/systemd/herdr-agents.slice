@@ -1,0 +1,2 @@
+[Unit]
+Description=Sandboxed herdr agents (network-filtered, see herdr_netfilter.py)

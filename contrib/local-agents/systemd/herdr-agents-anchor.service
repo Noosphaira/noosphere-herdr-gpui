@@ -1,0 +1,11 @@
+# Keeps herdr-agents.slice's cgroup in place between agent runs. The host's
+# nftables filter matches the cgroup's id, which changes if it is recreated.
+[Unit]
+Description=Keep herdr-agents.slice present for the agents' network filter
+
+[Service]
+Slice=herdr-agents.slice
+ExecStart=/usr/bin/sleep infinity
+
+[Install]
+WantedBy=default.target
