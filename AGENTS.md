@@ -175,6 +175,13 @@ just test-perf
 
 ## Git And Handoff
 
+- This checkout is the user's fork, `Noosphaira/noosphere-herdr-gpui`, and all
+  work happens there: branches, pushes, PRs and every `gh` command target the
+  fork, with its `main` as the base. Ignore the upstream `penso/herdr-gpui`
+  for everything (no PRs, issues, comments or pushes there, and no fetching,
+  syncing, merging or rebasing from it) unless the user explicitly asks for it
+  in the current request. Pass `--repo Noosphaira/noosphere-herdr-gpui` to
+  `gh` when unsure: in a fork, `gh` may otherwise default to the parent.
 - Only commit, push, or create/update a PR when requested. Do not amend, force-push, discard changes, or clean up other worktrees without explicit authorization.
 - Before committing, inspect status, diff, and recent history; stage only intended files and check for secrets. Do not bypass hooks or signing when they fail.
 - Use conventional commit subjects (`feat`, `fix`, `refactor`, `test`, `docs`, `chore`). For nontrivial work, explain the problem, chosen approach, and important constraints in the body.
