@@ -1,7 +1,7 @@
 # Local agent teams
 
-`herdr-launch` starts a team of OpenCode agents on a new git worktree, one
-herdr pane per role, each confined by `herdr-sandbox` (bubblewrap). The GUI's
+`herdr-launch` starts a team of coding agents (Pi or OpenCode) on a new git
+worktree, one herdr pane per role, each confined by `herdr-sandbox` (bubblewrap). The GUI's
 **Launch team** dialog runs the same command.
 
 ```
@@ -21,10 +21,27 @@ Install the launcher scripts with `./install.sh`. It copies the scripts to
 - `global.yaml`: folders every agent gets (`read_only`, `read_write`), plus `env` and `path`.
 - `repos.yaml`: extra folders per repo.
 
+## Pi or OpenCode
+
+A team runs Pi or OpenCode: `agent: pi` or `agent: opencode` in the team
+file, otherwise `agent` in `settings.yaml`, otherwise OpenCode. Both read the
+same role files in `~/.config/opencode/agents/`. OpenCode gets the role by
+name (`--agent`); for Pi, herdr-launch turns the front matter into `--model`
+and `--thinking` (off when `chat_template_kwargs` disables thinking, else
+medium) and passes the prompt with `--append-system-prompt`. Temperature and
+step limits are not passed to Pi. `pi_command` in `settings.yaml` sets how Pi
+starts; an absolute path pins a version. `sandbox_env` in `settings.yaml`
+adds variables inside every sandbox, with `{agent}`, `{role}` and `{branch}`
+filled in. Both agents run with their update checks and telemetry off (see
+`OFFLINE_ENV` in `herdr_agents.py`).
+
 ## What a sandboxed agent can reach
 
 - Its worktree and the repo's common `.git`, read-write; `.git/hooks` read-only.
-- `~/.config/opencode` read-only; OpenCode's data, state and cache read-write.
+- OpenCode: `~/.config/opencode` read-only; its data, state and cache read-write.
+- Pi: a tmpfs at `~/.pi/agent` with each entry bound read-only on top (Pi
+  writes lock files beside its config), `sessions/` read-write, and the
+  folder Pi is installed in, read-only.
 - `/usr` and a minimal `/etc`; granted folders; the network.
 - Its own PID namespace: it cannot see your other processes.
 
@@ -32,7 +49,7 @@ The rest of the home directory is an empty tmpfs. herdr's control socket is
 never bound in: whoever can write to it can run commands in any pane. A filter
 socket is bound in instead, which forwards only `pane.report_agent`,
 `pane.report_agent_session` and `pane.release_agent`, and only for the
-agent's own pane. That is all OpenCode's herdr integration sends.
+agent's own pane. That is all the OpenCode and Pi herdr integrations send.
 
 ## Editing teams, agents and folder access
 

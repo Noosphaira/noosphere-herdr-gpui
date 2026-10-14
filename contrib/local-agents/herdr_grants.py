@@ -33,6 +33,7 @@ FORBIDDEN = [
 # write them could widen its next sandbox or run code outside it.
 FORBIDDEN_WRITE = [
     HOME / ".config/opencode",
+    HOME / ".pi/agent",
     HOME / ".local/bin",
     HOME / ".local/share/herdr-launch",
     HOME / ".config/systemd",

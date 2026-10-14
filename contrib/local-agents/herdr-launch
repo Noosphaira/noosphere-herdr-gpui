@@ -1,13 +1,13 @@
 #!/usr/bin/env python3
-"""Launch a team of sandboxed OpenCode agents on a new git worktree.
+"""Launch a team of sandboxed coding agents (OpenCode or Pi) on a new git worktree.
 
 Usage:
   herdr-launch --list-teams
   herdr-launch --team <team> --repo <path> --branch <name> --task <text>
                [--base <ref>] [--session <name>] [--json]
 
-Creates the worktree through herdr, opens one pane per role, starts
-`opencode --agent <role>` in each pane through herdr-sandbox as a team member,
+Creates the worktree through herdr, opens one pane per role, starts the
+team's agent for each role in its pane through herdr-sandbox as a team member,
 waits until herdr sees each agent ready, then gives the task to the first role
 of the team's `flow`. Roles hand work on with the `team` command; a watcher
 (herdr-team-watch) reminds an agent that stops without handing off and
@@ -17,6 +17,11 @@ Team file (~/.config/herdr-launch/teams/<team>.yaml):
   roles: [ui-designer, coder, reviewer]   # one pane each, left to right
   flow: [ui-designer, coder, reviewer]    # who works when (default: roles)
   review_rounds: 2                        # messages back to an earlier role
+  agent: pi                               # opencode or pi (default: the setting below)
+
+Launcher settings (~/.config/herdr-launch/settings.yaml), besides repos_dir:
+  agent: pi                               # for teams that name none (default: opencode)
+  pi_command: pi                          # how to start Pi; an absolute path pins a version
 
 Progress goes to stderr as "step <n>/<total>: <text>". On failure nothing is
 cleaned up; the failing step and its output are reported (as JSON with --json).
@@ -31,11 +36,13 @@ import time
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+import herdr_agents  # noqa: E402
 import herdr_grants  # noqa: E402
 import herdr_team  # noqa: E402
 
 TEAMS_DIR = herdr_grants.CONFIG_DIR / "teams"
-AGENTS_DIR = Path.home() / ".config/opencode/agents"
+SETTINGS = herdr_grants.CONFIG_DIR / "settings.yaml"
+AGENTS_DIR = herdr_agents.AGENTS_DIR
 SANDBOX = Path(__file__).resolve().parent / "herdr-sandbox"
 WATCHER = Path(__file__).resolve().parent / "herdr-team-watch"
 STEPS = 6
@@ -97,8 +104,20 @@ class Launcher:
             raise StepError("validate", f"{team_file} lists a role twice")
         missing = [r for r in roles if not (AGENTS_DIR / f"{r}.md").is_file()]
         if missing:
-            raise StepError("validate", f"no OpenCode agent file for: {', '.join(missing)} in {AGENTS_DIR}")
+            raise StepError("validate", f"no agent file for: {', '.join(missing)} in {AGENTS_DIR}")
         self.roles = roles
+        settings = herdr_grants.read_yaml(SETTINGS, {})
+        settings = settings if isinstance(settings, dict) else {}
+        self.agent = team.get("agent") or settings.get("agent") or herdr_agents.DEFAULT
+        if self.agent not in herdr_agents.AGENTS:
+            raise StepError("validate", f"{team_file}: agent must be one of {', '.join(herdr_agents.AGENTS)}")
+        self.pi_command = str(settings.get("pi_command") or "pi")
+        try:
+            self.commands = {
+                role: herdr_agents.role_command(self.agent, role, self.pi_command) for role in roles
+            }
+        except (herdr_agents.AgentError, OSError) as error:
+            raise StepError("validate", str(error)) from error
         flow = team.get("flow", roles)
         if not isinstance(flow, list) or sorted(flow) != sorted(roles):
             raise StepError("validate", f"{team_file}: flow must list each role exactly once")
@@ -167,9 +186,15 @@ class Launcher:
             self.panes, self.review_rounds,
         )
         for role, pane in self.panes.items():
+            agent_command, prompt = self.commands[role]
+            if prompt is not None:
+                # herdr-sandbox binds this file at herdr_agents.PROMPT_IN_SANDBOX.
+                prompts = self.team_dir / "prompts"
+                prompts.mkdir(exist_ok=True)
+                (prompts / f"{role}.md").write_text(prompt)
             command = [
                 str(SANDBOX), "--team-dir", str(self.team_dir), "--role", role,
-                self.worktree, "--", "opencode", "--agent", role,
+                self.worktree, "--", *agent_command,
             ]
             self.herdr("pane", "run", pane, shlex.join(command))
 
@@ -222,6 +247,7 @@ class Launcher:
             "panes": self.panes,
             "flow": self.flow,
             "team_dir": str(self.team_dir),
+            "agent": self.agent,
         }
 
 

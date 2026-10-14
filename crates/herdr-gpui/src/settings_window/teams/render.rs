@@ -647,7 +647,7 @@ impl SettingsWindow {
             .child(add)
             .child(self.control_note(
                 "Refused when saved: your home folder itself, ~/.ssh, ~/.gnupg, and Herdr's own settings; \
-                 read-write also refuses OpenCode's settings, ~/.local/bin, and folders containing a git repository.",
+                 read-write also refuses Pi's and OpenCode's settings, ~/.local/bin, and folders containing a git repository.",
             ))
             .child(actions)
     }
