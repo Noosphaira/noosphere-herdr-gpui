@@ -12,6 +12,14 @@ ln -sf "$dest/herdr-sandbox" "$HOME/.local/bin/herdr-sandbox"
 ln -sf "$dest/herdr-launch" "$HOME/.local/bin/herdr-launch"
 ln -sf "$dest/herdr-teams" "$HOME/.local/bin/herdr-teams"
 ln -sf "$dest/herdr-repos" "$HOME/.local/bin/herdr-repos"
+# Role tools (team-tools/team_tools.py), one link per tool name. Agents get
+# them by granting $dest/team-tools read-only and adding its bin to `path` in
+# global.yaml.
+mkdir -p "$dest/team-tools/bin"
+install -m 0755 "$src/team-tools/team_tools.py" "$dest/team-tools/"
+for tool in $(python3 -c 'import sys; sys.path.insert(0, sys.argv[1]); import team_tools; print(*team_tools.TOOLS)' "$src/team-tools"); do
+  ln -sfn ../team_tools.py "$dest/team-tools/bin/$tool"
+done
 for f in global.yaml repos.yaml settings.yaml teams/app-team.yaml; do
   [ -e "$HOME/.config/herdr-launch/$f" ] || install -m 0644 "$src/config/$f" "$HOME/.config/herdr-launch/$f"
 done
