@@ -117,7 +117,25 @@ without handing off, and sends a desktop notification when an agent needs you
 or the team is done. Team state lives under `$XDG_RUNTIME_DIR/herdr-launch/`,
 outside every sandbox.
 
-Tests (filter rules and herdr-teams, against a throwaway home):
+## Role tools, scenarios and reports
+
+`team-tools/team_tools.py` holds the checks the TDD teams' roles run inside
+the sandbox (`setup-env`, `brief-lint`, `red-check`, `ac-trace`, `check`,
+`review-pack`, ...; `team_tools.py` with no arguments lists them). The
+planner writes the acceptance criteria as Gherkin scenarios, one per
+criterion and tagged `@AC-n`, in the `.feature` files the brief's FEATURES
+section names. The test author binds them to step code with pytest-bdd or
+`@amiceli/vitest-cucumber` when the repo has one as a dev dependency, and
+with plain tests citing `AC-n` when it doesn't. Only `plan:` commits may
+change a `.feature` file.
+
+`setup-env`, `red-check` and `check` also leave Allure results in the
+worktree's `.team/allure/`. On the host, `team-report [WORKTREE...] [--open]`
+adds every run not yet reported to that repo's history and writes a
+single-file Allure report to `~/.local/share/herdr-launch/reports/<repo>/report/`.
+The Allure CLI it uses is pinned in `install.sh`; agents never get it.
+
+Tests (filter rules, herdr-teams and the role tools, against throwaway repos):
 `python3 -m unittest discover -s contrib/local-agents/tests`
 
 Known gaps: through the shared `.git` an agent can move any branch of its
