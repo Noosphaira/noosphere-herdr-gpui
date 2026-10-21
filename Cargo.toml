@@ -6,9 +6,10 @@ resolver = "2"
 edition      = "2024"
 license      = "Apache-2.0"
 rust-version = "1.96"
-# Cargo metadata only. Releases carry a derived calendar version YYYYMMDD.COUNTER
-# that CI embeds as HERDR_RELEASE_VERSION; this value never reaches the UI.
-version = "0.1.0"
+# The fork's version, shown as "GUI x.y.z" in the status bar and About. Bump it
+# as AGENTS.md "Versioning" says. Upstream's calendar release version
+# (HERDR_RELEASE_VERSION, set only by its release CI) stays the updater's.
+version = "0.2.0"
 # Workspace crates are not published to crates.io; they build this application.
 publish = false
 

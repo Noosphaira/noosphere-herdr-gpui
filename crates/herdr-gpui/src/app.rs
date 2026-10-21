@@ -3,7 +3,7 @@
 //! ever creating a window.
 
 use crate::{
-    APP_VERSION, HerdrWindow, Hide, HideOthers, Quit, ShowAll, ShowLogs, WINDOW_TITLE, app_icon,
+    GUI_VERSION, HerdrWindow, Hide, HideOthers, Quit, ShowAll, ShowLogs, WINDOW_TITLE, app_icon,
     bind_keys, cli,
     config::{Config, Theme},
     diagnostics, icons, log_window, menus, titlebar, updater,
@@ -210,7 +210,7 @@ pub(crate) fn run() -> std::process::ExitCode {
         return std::process::ExitCode::FAILURE;
     }
     tracing::info!(
-        version = APP_VERSION,
+        version = GUI_VERSION,
         os = std::env::consts::OS,
         arch = std::env::consts::ARCH,
         "GPUI client starting"

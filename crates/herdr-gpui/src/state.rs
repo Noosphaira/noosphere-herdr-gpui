@@ -76,6 +76,8 @@ pub struct LiveState {
     /// Why the last handshake was refused, when updating one side fixes it.
     /// Cleared by the next accepted handshake.
     pub version_mismatch: Option<herdr_client::VersionMismatch>,
+    /// The connected daemon's version, from its welcome. None while disconnected.
+    pub server_version: Option<String>,
     /// Same-user peer at the owned standard socket, not executable attestation.
     pub(crate) local_daemon_peer: bool,
     /// `pane.clear` arrived after Herdr 0.9.1; older daemons reject it.
@@ -182,6 +184,7 @@ impl Default for LiveState {
             error: None,
             missing_installation: false,
             version_mismatch: None,
+            server_version: None,
             local_daemon_peer: false,
             supports_pane_clear: false,
             supports_tab_move: false,
@@ -234,6 +237,7 @@ impl LiveState {
             error,
             missing_installation,
             version_mismatch,
+            server_version,
             local_daemon_peer,
             supports_pane_clear,
             supports_tab_move,
@@ -284,6 +288,7 @@ impl LiveState {
             && *error == self.error
             && *missing_installation == self.missing_installation
             && *version_mismatch == self.version_mismatch
+            && *server_version == self.server_version
             && *local_daemon_peer == self.local_daemon_peer
             && *supports_pane_clear == self.supports_pane_clear
             && *supports_tab_move == self.supports_tab_move
@@ -449,6 +454,8 @@ impl LiveState {
                         });
                 self.missing_installation = false;
                 self.version_mismatch = None;
+                // Daemon text: bounded so it cannot widen the status bar.
+                self.server_version = Some(welcome.server_version.chars().take(32).collect());
                 // The daemon reports the mode to each new connection.
                 self.keyboard_report_all = false;
                 self.status = ConnectionStatus::AwaitingSnapshot;
@@ -528,6 +535,7 @@ impl LiveState {
                 self.bells = 0;
                 self.window_title = None;
                 self.status = ConnectionStatus::Disconnected;
+                self.server_version = None;
                 self.error = Some(reason);
                 self.snapshot = None;
                 self.agent_recency = AgentRecency::default();

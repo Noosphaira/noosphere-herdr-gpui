@@ -21,6 +21,11 @@ pub(crate) const APP_VERSION: &str = match option_env!("HERDR_RELEASE_VERSION") 
     None => "dev",
 };
 
+// The fork's own version, shown in the status bar and About. It is the
+// workspace version in Cargo.toml, bumped by hand as AGENTS.md describes; the
+// updater keeps `APP_VERSION`, which only upstream's release pipeline sets.
+pub(crate) const GUI_VERSION: &str = env!("CARGO_PKG_VERSION");
+
 // Only the signed release pipeline sets that tag. Local `just run` and worktree
 // builds are unsigned, so features that depend on a stable code identity (such as
 // macOS Keychain access) must treat them as development builds.
