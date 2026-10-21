@@ -145,7 +145,7 @@ fn filtered(records: Vec<Arc<Record>>, query: &str, minimum: Level) -> Vec<Arc<R
 fn export_text(rows: &[Arc<Record>], dropped: u64) -> serde_json::Result<String> {
     let mut text = serde_json::to_string(&serde_json::json!({
         "type": "metadata", "schema_version": 1,
-        "app_version": crate::APP_VERSION,
+        "app_version": crate::GUI_VERSION,
         "os": std::env::consts::OS, "arch": std::env::consts::ARCH,
         "dropped": dropped, "timestamp_format": "local [YYYY-MM-DD HH:MM:SS]"
     }))?;

@@ -124,6 +124,28 @@ and `publish` passes its `RELEASE_NOTES.md` to `gh release create --notes-file`.
   to check a branch by hand. Fix a rejected subject with `git commit --amend`
   rather than `--no-verify`.
 
+## Versioning
+
+- The fork's version is `version` under `[workspace.package]` in the root
+  `Cargo.toml`, in semver. The app shows it as `GUI x.y.z` at the right of the
+  status bar and in About, and logs it at startup and in log exports. The
+  Herdr version beside it comes from the connected daemon's welcome; never
+  hardcode or guess it.
+- Bump it in the pull request that makes the change, once per pull request,
+  by its most significant commit type (see Changelog):
+  - `feat`, or any breaking change: minor while below 1.0 (0.2.0 -> 0.3.0).
+  - `fix`, `perf`, `refactor`, or `revert`: patch (0.2.0 -> 0.2.1).
+  - `chore`, `ci`, `build`, `style`, `test`, or `docs` alone: no bump.
+- Bump from the version on `main`, not from another open pull request. When
+  another bump lands first, rebase and bump again from the new `main`.
+- Commit `Cargo.toml` and `Cargo.lock` together. A plain `cargo build` updates
+  the lockfile; its diff must touch only the three workspace crates' versions.
+  Put the bump in the change's own commit, not a separate `chore` commit.
+- State the bump in the PR summary, for example `Version: 0.2.0 -> 0.2.1`.
+- Leave `APP_VERSION` and `HERDR_RELEASE_VERSION` alone: they are upstream's
+  calendar release identity, which the updater and release-only behavior key
+  off. Setting `HERDR_RELEASE_VERSION` in a local build turns those on.
+
 ## Verification
 
 Prefer the existing `just` recipes. Run focused tests while iterating, then the
