@@ -54,3 +54,26 @@ fn long_text_wraps_into_rows(cx: &mut TestAppContext) {
         assert!(input.rows > 1, "{} rows", input.rows)
     });
 }
+
+#[gpui::test]
+fn linux_clipboard_keys_paste_copy_and_cut(cx: &mut TestAppContext) {
+    let (input, cx) = field(cx);
+    cx.write_to_clipboard(ClipboardItem::new_string("pasted\ntask".into()));
+    cx.simulate_keystrokes("shift-insert");
+    input.read_with(cx, |input, _| assert_eq!(input.text(), "pasted\ntask"));
+    cx.simulate_keystrokes("cmd-a shift-delete");
+    input.read_with(cx, |input, _| assert_eq!(input.text(), ""));
+    assert_eq!(
+        cx.read_from_clipboard()
+            .and_then(|item| item.text())
+            .as_deref(),
+        Some("pasted\ntask")
+    );
+    #[cfg(not(target_os = "macos"))]
+    {
+        cx.simulate_keystrokes("ctrl-v ctrl-v");
+        input.read_with(cx, |input, _| {
+            assert_eq!(input.text(), "pasted\ntaskpasted\ntask")
+        });
+    }
+}

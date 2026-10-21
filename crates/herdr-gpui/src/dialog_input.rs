@@ -93,6 +93,9 @@ impl DialogInput {
         if self.marked.is_some() {
             return false;
         }
+        if let Some(edit) = crate::actions::clipboard_alias(key) {
+            return self.key(&edit.keystroke, cx);
+        }
         let cursor = self.cursor();
         let previous = self
             .text
@@ -360,6 +363,21 @@ mod tests {
             assert_eq!(input.text, "e\u{301}X");
             input.replace(None, &"x".repeat(20000), false, None);
             assert_eq!(input.text.len(), 4100);
+        });
+    }
+
+    #[gpui::test]
+    fn shift_insert_pastes_and_ctrl_insert_copies(cx: &mut gpui::TestAppContext) {
+        cx.update(|cx| {
+            cx.write_to_clipboard(gpui::ClipboardItem::new_string("feature".into()));
+            let mut input = DialogInput::new(String::new());
+            assert!(input.key(&Keystroke::parse("shift-insert").unwrap_or_default(), cx));
+            assert_eq!(input.text, "feature");
+            input.key(&Keystroke::parse("cmd-a").unwrap_or_default(), cx);
+            cx.write_to_clipboard(gpui::ClipboardItem::new_string(String::new()));
+            input.key(&Keystroke::parse("ctrl-insert").unwrap_or_default(), cx);
+            let copied = cx.read_from_clipboard().and_then(|item| item.text());
+            assert_eq!(copied.as_deref(), Some("feature"));
         });
     }
 
