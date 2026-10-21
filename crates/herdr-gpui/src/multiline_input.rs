@@ -252,6 +252,9 @@ impl MultilineInput {
         if self.is_composing() {
             return;
         }
+        if let Some(edit) = actions::clipboard_alias(&event.keystroke) {
+            return self.key_down(&edit, window, cx);
+        }
         let key = event.keystroke.key.as_str();
         let modifiers = event.keystroke.modifiers;
         if key == "enter" && modifiers.shift && !modifiers.platform && !modifiers.control {

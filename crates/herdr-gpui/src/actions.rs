@@ -53,6 +53,31 @@ pub(crate) fn edit_key(key: &str) -> KeyDownEvent {
     }
 }
 
+/// The Cmd-X/C/V a text field takes `keystroke` for, when it is one of the
+/// clipboard keys without Cmd: Shift-Insert, Ctrl-Insert, and Shift-Delete
+/// everywhere, and Ctrl-V/C/X off macOS. On Linux Cmd is Super, which window
+/// managers usually keep; Omarchy's Super-V reaches the app as Shift-Insert.
+pub(crate) fn clipboard_alias(keystroke: &Keystroke) -> Option<KeyDownEvent> {
+    let Modifiers {
+        control,
+        alt,
+        shift,
+        platform,
+        ..
+    } = keystroke.modifiers;
+    if alt || platform {
+        return None;
+    }
+    let key = match (keystroke.key.as_str(), control, shift) {
+        ("insert", false, true) => "v",
+        ("insert", true, false) => "c",
+        ("delete", false, true) => "x",
+        (key @ ("v" | "c" | "x"), true, false) if !cfg!(target_os = "macos") => key,
+        _ => return None,
+    };
+    Some(edit_key(key))
+}
+
 #[derive(Clone, PartialEq, serde::Deserialize, Action)]
 #[action(no_json)]
 pub(crate) struct RunCommand {
@@ -149,4 +174,38 @@ pub(crate) fn rebind_keys(cx: &mut App) {
     cx.clear_key_bindings();
     bind_keys(cx);
     crate::menus::install(cx);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::clipboard_alias;
+    use gpui::Keystroke;
+
+    fn alias(keystroke: &str) -> Option<String> {
+        let keystroke = Keystroke::parse(keystroke).unwrap_or_default();
+        clipboard_alias(&keystroke).map(|event| {
+            assert!(event.keystroke.modifiers.platform);
+            event.keystroke.key
+        })
+    }
+
+    #[test]
+    fn clipboard_keys_without_cmd_stand_for_cmd_x_c_v() {
+        assert_eq!(alias("shift-insert").as_deref(), Some("v"));
+        assert_eq!(alias("ctrl-insert").as_deref(), Some("c"));
+        assert_eq!(alias("shift-delete").as_deref(), Some("x"));
+        for other in [
+            "insert",
+            "delete",
+            "ctrl-shift-insert",
+            "alt-shift-insert",
+            "cmd-v",
+            "ctrl-a",
+        ] {
+            assert_eq!(alias(other), None, "{other}");
+        }
+        let ctrl = (!cfg!(target_os = "macos")).then(|| "v".to_owned());
+        assert_eq!(alias("ctrl-v"), ctrl);
+        assert_eq!(alias("ctrl-shift-v"), None);
+    }
 }
