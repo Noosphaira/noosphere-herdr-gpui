@@ -1,7 +1,8 @@
 team: app-team
 # One pane each, left to right.
 roles: [ui-designer, coder, reviewer]
-# Who works when: each role hands off to the next with `team send`.
+# Who works when: one stage per role in this order; each reports `team done`
+# and the orchestrator hands the work on (herdr_flow.py).
 flow: [ui-designer, coder, reviewer]
-# How many times the reviewer may send findings back to the coder.
+# How many times the reviewer may send `team findings` back to the coder.
 review_rounds: 2

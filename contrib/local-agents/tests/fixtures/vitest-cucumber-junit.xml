@@ -1,0 +1,41 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<testsuites name="vitest tests" tests="6" failures="2" errors="0" time="0.006871721">
+    <testsuite name="src/totals.test.js" timestamp="2026-10-17T09:29:15.869Z" hostname="h" tests="6" failures="2" errors="0" skipped="0" time="0.006871721">
+        <testcase classname="src/totals.test.js" name="Feature: Invoice totals &gt; Scenario: Totals are rounded to cents &gt; Given an invoice with lines 0.1 and 0.2" time="0.000564881">
+        </testcase>
+        <testcase classname="src/totals.test.js" name="Feature: Invoice totals &gt; Scenario: Totals are rounded to cents &gt; When the total is computed" time="0.000101051">
+        </testcase>
+        <testcase classname="src/totals.test.js" name="Feature: Invoice totals &gt; Scenario: Totals are rounded to cents &gt; Then the total is 0.30" time="0.003296256">
+            <failure message="expected +0 to be 0.3 // Object.is equality" type="AssertionError">
+AssertionError: expected +0 to be 0.3 // Object.is equality
+
+- Expected
++ Received
+
+- 0.3
++ 0
+
+ ❯ Object.fn src/totals.test.js:10:54
+ ❯ node_modules/@amiceli/vitest-cucumber/dist/describe-feature-CdxOfcs4.mjs:159:23
+            </failure>
+        </testcase>
+        <testcase classname="src/totals.test.js" name="Feature: Invoice totals &gt; Scenario: An empty invoice is rejected &gt; Given an invoice with no lines" time="0.000086945">
+        </testcase>
+        <testcase classname="src/totals.test.js" name="Feature: Invoice totals &gt; Scenario: An empty invoice is rejected &gt; When the total is computed" time="0.000077066">
+        </testcase>
+        <testcase classname="src/totals.test.js" name="Feature: Invoice totals &gt; Scenario: An empty invoice is rejected &gt; Then it fails with &quot;empty invoice&quot;" time="0.001044739">
+            <failure message="expected [Function run] to throw an error" type="AssertionError">
+AssertionError: expected [Function run] to throw an error
+
+- Expected:
+null
+
++ Received:
+undefined
+
+ ❯ Object.fn src/totals.test.js:16:63
+ ❯ node_modules/@amiceli/vitest-cucumber/dist/describe-feature-CdxOfcs4.mjs:159:23
+            </failure>
+        </testcase>
+    </testsuite>
+</testsuites>

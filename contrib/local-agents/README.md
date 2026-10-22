@@ -99,25 +99,101 @@ or `<repos_dir>/<owner>-<name>` if that name is taken.
 
 ## Teamwork
 
-The team file's `flow` sets who works when. The launcher gives the task to the
-first role only; each role hands on with the `team` command, available inside
-its sandbox:
+The team file's `stages` say who works when and what decides the next step
+(`herdr_flow.py`; a file with only `flow` gets one stage per role in order):
+
+```yaml
+start: plan
+stages:
+  plan:   {role: planner,      next: red}
+  red:    {role: test-author,  check: red-check, pass: green,  fail: red}
+  green:  {role: tdd-coder,    check: check,     pass: review, fail: green}
+  review: {role: tdd-reviewer, check: review-check, pass: finish, fail: review, findings: green}
+limits: {fail: 3, findings: 3}
+```
+
+Agents never hand work on. They report with the `team` command, available
+inside the sandbox:
 
 ```
-team info                    role, order, task
-team status                  each teammate's state
-team send <role> <message>   message a teammate (queued if it is busy)
-team done <summary>          finish, and notify the user
+team info                     your stages, whose turn it is, the task
+team status                   each teammate's state
+team done <summary>           your turn is done and committed
+team findings <findings>      (stages with `findings`) send findings on
+team blocked <what failed>    you can't go on: notify the user, mark the pane
+team ask <role> <question>    ask a teammate; it doesn't change whose turn it is
+team answer <role> <answer>   answer a teammate
 ```
 
-Messages go through the filter, which sets the sender, only reaches this
-team's panes, and caps messages back to an earlier role at `review_rounds`.
-`herdr-team-watch` (started by the launcher) reminds an agent that stops
-without handing off, and sends a desktop notification when an agent needs you
-or the team is done. Team state lives under `$XDG_RUNTIME_DIR/herdr-launch/`,
-outside every sandbox.
+Only the role whose turn it is can report done or findings. The orchestrator
+(`herdr-team-watch`, started by the launcher, outside every sandbox) acts on
+each report: it refuses a `team done` with uncommitted changes, runs the
+stage's check inside the sandbox (`herdr-sandbox`, never on the host; the
+check finds the role's summary in `$TEAM_REPORT`; full output in `checks/`
+of the team directory), and prompts the role of the next
+stage with the summary, the findings, or the failed check's output. More
+than `limits.fail` failed checks in a stage, or `limits.findings` findings in
+all, stop the team; `finish` ends it. It reminds a role that goes idle
+without reporting once, then notifies the user. Team state, including the log
+of every move, lives under `$XDG_RUNTIME_DIR/herdr-launch/`.
 
-Tests (filter rules and herdr-teams, against a throwaway home):
+The GUI tints and frames red a pane whose agent is blocked on an approval or
+ran `team blocked` (the `team_waiting` pane token; cleared when the agent
+works again after the user answered), and tints and frames in the accent
+color the tab's working agent, or the one that last changed state, when the
+tab shows several agents.
+
+## Runs and traces
+
+Every launch is a run with its own id (`20261021T201500Z-a1b2c3`: UTC start
+time and six random hex digits) and a setup version: the first 12 hex digits
+of a sha256 over the files that shaped the team, each as its path and its
+content's sha256 (sorted by path; a missing file counts as `<missing>`). The
+files are the team file, each role's agent file, `settings.yaml`,
+`global.yaml` and `repos.yaml`. Same files, same version; any edit, a new one.
+
+The launcher writes a lasting record of the run to
+`~/.local/share/herdr-launch/runs/<run id>.json` (`$XDG_DATA_HOME`): the id,
+team (the team file's name), start time, setup version with each file's
+hash, workspace, branch, task, worktree and roles. The orchestrator adds the
+outcome when the team ends (`finished` with the last summary, or `stopped`
+with the reason, plus the end time and the log of moves). A failed check's
+log entry keeps the last 2,000 characters of its output, since the team
+directory with the full output is gone after a reboot. A record that can't be
+written never stops a team. The improvement pipeline (noosphere-mastra-workflows,
+setup kind `coding-teams`) reads these records.
+
+Every agent of the run gets `HERDR_TEAM_RUN` and `HERDR_SETUP_VERSION` in its
+environment, and `sandbox_env` values may use `{run}`. Pi's Opik extension
+(services-and-setups `Pi/extensions/opik-trace.ts`) puts both on each trace,
+as metadata `run_id` and `setup_version` and as tags `run:<id>` and
+`setup:<version>`, so a run's traces can be found together in Opik.
+
+## Role tools, scenarios and reports
+
+`team-tools/team_tools.py` (with `team_repo.py`, `team_gherkin.py` and
+`team_allure.py` beside it) holds the checks the TDD teams' roles run inside
+the sandbox (`setup-env`, `brief-lint`, `red-check`, `ac-trace`, `check`,
+`review-pack`, `review-check`, ...; `team_tools.py` with no arguments lists them). The
+planner writes the acceptance criteria as Gherkin scenarios, one per
+criterion and tagged `@AC-n`, in the `.feature` files the brief's FEATURES
+section names. The test author binds them to step code with pytest-bdd or
+`@amiceli/vitest-cucumber` when the repo has one as a dev dependency, and
+with plain tests citing `AC-n` when it doesn't. Only `plan:` commits may
+change a `.feature` file. `red-check` judges only the tests the branch adds or
+changes: each must fail on an assertion and reach one of the brief's ENTRY
+POINTS (what the task's user calls), and every criterion needs one failing
+test; others of that criterion may pass against the stub. `review-check` fails while an OWNED PATH of the
+brief is unchanged and the reviewer's summary doesn't name it with a reason:
+passing tests don't show that the brief's planned work was done.
+
+`setup-env`, `red-check` and `check` also leave Allure results in the
+worktree's `.team/allure/`. On the host, `team-report [WORKTREE...] [--open]`
+adds every run not yet reported to that repo's history and writes a
+single-file Allure report to `~/.local/share/herdr-launch/reports/<repo>/report/`.
+The Allure CLI it uses is pinned in `install.sh`; agents never get it.
+
+Tests (filter rules, herdr-teams and the role tools, against throwaway repos):
 `python3 -m unittest discover -s contrib/local-agents/tests`
 
 Known gaps: through the shared `.git` an agent can move any branch of its

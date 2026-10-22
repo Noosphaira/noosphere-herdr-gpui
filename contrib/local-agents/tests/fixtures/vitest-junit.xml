@@ -1,0 +1,43 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<testsuites name="vitest tests" tests="5" failures="4" errors="0" time="0.005686696">
+    <testsuite name="a.test.ts" timestamp="2026-10-16T10:45:47.194Z" hostname="noosphere-prime" tests="4" failures="3" errors="0" skipped="0" time="0.005686696">
+        <testcase classname="a.test.ts" name="assert fails AC-1" time="0.004153411">
+            <failure message="expected 2 to be 3 // Object.is equality" type="AssertionError">
+AssertionError: expected 2 to be 3 // Object.is equality
+
+- Expected
++ Received
+
+- 3
++ 2
+
+ ❯ a.test.ts:3:47
+            </failure>
+        </testcase>
+        <testcase classname="a.test.ts" name="type error" time="0.000472636">
+            <failure message="Cannot read properties of undefined (reading &apos;x&apos;)" type="TypeError">
+TypeError: Cannot read properties of undefined (reading &apos;x&apos;)
+ ❯ a.test.ts:4:45
+            </failure>
+        </testcase>
+        <testcase classname="a.test.ts" name="not a function" time="0.000220888">
+            <failure message="nope is not a function" type="TypeError">
+TypeError: nope is not a function
+ ❯ a.test.ts:5:30
+            </failure>
+        </testcase>
+        <testcase classname="a.test.ts" name="passes" time="0.000160605">
+        </testcase>
+    </testsuite>
+    <testsuite name="b.test.ts" timestamp="2026-10-16T10:45:47.196Z" hostname="noosphere-prime" tests="1" failures="1" errors="0" skipped="0" time="0">
+        <testcase classname="b.test.ts" name="b.test.ts" time="0">
+            <failure message="Cannot find module &apos;./does-not-exist&apos; imported from /repo/b.test.ts" type="Error">
+Error: Cannot find module &apos;./does-not-exist&apos; imported from /repo/b.test.ts
+ ❯ b.test.ts:2:1
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯
+Serialized Error: { code: &apos;ERR_MODULE_NOT_FOUND&apos; }
+            </failure>
+        </testcase>
+    </testsuite>
+</testsuites>

@@ -1,12 +1,17 @@
 #!/usr/bin/env python3
-"""Talk to the rest of your team. Available inside a launched team's sandbox.
+"""Work in your team. Available inside a launched team's sandbox.
 
-  team info                      your role, the order of roles, and the task
+  team info                      your role, your stages, whose turn it is, the task
   team status                    every teammate's state (working, idle, ...)
-  team send <role> <message>     message a teammate; `-` reads it from stdin
-  team done <summary>            mark the team's work finished and notify the user
+  team done <summary>            your turn is done and committed: the team runs the
+                                 stage's check and moves the work on
+  team findings <findings>       (stages that allow it) send numbered findings on
+  team blocked <what failed>     you can't go on (a tool can't run): notify the user, stop
+  team ask <role> <question>     ask a teammate; `-` reads it from stdin
+  team answer <role> <answer>    answer a teammate's question
 
-A message to a busy teammate waits until it finishes its current step.
+Only the role whose turn it is reports done or findings. Asking and answering
+never change whose turn it is.
 """
 
 import json
@@ -36,6 +41,10 @@ def call(method, params=None):
     return answer.get("result", {})
 
 
+def text(args):
+    return sys.stdin.read() if args == ["-"] else " ".join(args)
+
+
 def main():
     args = sys.argv[1:]
     command = args[0] if args else "info"
@@ -44,25 +53,34 @@ def main():
     elif command == "info":
         info = call("team.info")
         print(f"You are: {info['role']}")
-        print(f"Order:   {' -> '.join(info['flow'])}")
-        print(f"Next:    {info['next'] or '(you are last: finish with `team done`)'}")
-        print(f"Review rounds left: {info['review_rounds_left']}")
+        print(f"Turn:    {info['turn'] or '(not started)'} (stage {info['stage']})")
+        for name, stage in info["your_stages"].items():
+            moves = ", ".join(f"{key} -> {stage[key]}" for key in ("next", "pass", "fail", "findings") if key in stage)
+            check = f"check `{stage['check']}`; " if "check" in stage else ""
+            print(f"Stage {name}: {check}{moves}")
+        print(f"Team:    {', '.join(info['roles'])}")
         print(f"Branch:  {info['branch']}")
+        if info["done"] or info["stopped"]:
+            print(f"\nThe team has {'stopped: ' + info['stopped'] if info['stopped'] else 'finished'}.")
         print(f"\nTask:\n{info['task']}")
     elif command == "status":
         info = call("team.status")
-        for role in info["flow"]:
+        for role, status in info["statuses"].items():
             marker = "  <- you" if role == info["role"] else ""
-            print(f"{role:<16} {info['statuses'].get(role, '?')}{marker}")
-        if info["done"]:
-            print("\nThe team has finished.")
-    elif command == "send" and len(args) >= 3:
-        text = sys.stdin.read() if args[2:] == ["-"] else " ".join(args[2:])
-        result = call("team.send", {"to": args[1], "text": text})
-        print(f"sent to {result['delivered_to']}")
+            turn = "  (its turn)" if role == info["turn"] else ""
+            print(f"{role:<16} {status}{turn}{marker}")
     elif command == "done":
-        call("team.done", {"summary": " ".join(args[1:])})
-        print("team marked finished; the user has been notified")
+        result = call("team.done", {"summary": text(args[1:])})
+        print(f"reported done: {result['next']}")
+    elif command == "findings" and len(args) >= 2:
+        result = call("team.findings", {"text": text(args[1:])})
+        print(f"reported findings: {result['next']}")
+    elif command == "blocked" and len(args) >= 2:
+        call("team.blocked", {"text": text(args[1:])})
+        print("the user has been notified and your pane is marked; stop now")
+    elif command in ("ask", "answer") and len(args) >= 3:
+        result = call(f"team.{command}", {"to": args[1], "text": text(args[2:])})
+        print(f"sent to {args[1]}")
     else:
         sys.exit(__doc__.strip())
 

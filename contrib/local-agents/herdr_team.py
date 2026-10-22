@@ -1,17 +1,21 @@
 """A launched team's shared files, outside every sandbox.
 
 herdr-launch writes `team.json` into a private directory under
-$XDG_RUNTIME_DIR: the task, the order roles work in, and each role's pane.
-Every role's socket filter and the launcher's watcher read it and keep
-`state.json` beside it: whose turn it is, how many review rounds have been
-used, and whether the team has finished. Agents never see either file; they
-reach them only through the filter's `team.*` methods.
+$XDG_RUNTIME_DIR: the task, the team's stages (herdr_flow), each role's pane
+and the worktree. Every role's socket filter and the team's orchestrator
+(herdr-team-watch) read it and keep `state.json` beside it: the current
+stage, what roles reported, failed checks and findings so far, who is
+blocked, and whether the team has finished. Agents never see either file;
+they reach them only through the filter's `team.*` methods.
 """
 
+import datetime
 import fcntl
+import hashlib
 import json
 import os
 import re
+import secrets
 import subprocess
 import tempfile
 import time
@@ -30,19 +34,101 @@ def runtime_root():
     return root
 
 
-def create(workspace_id, branch, task, flow, members, review_rounds):
-    """Write a new team directory and return its path."""
+def runs_root():
+    """Lasting run records, one JSON file per run (README "Runs and traces")."""
+    base = os.environ.get("XDG_DATA_HOME") or str(Path.home() / ".local" / "share")
+    return Path(base) / "herdr-launch" / "runs"
+
+
+def utc_now():
+    return datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def new_run_id():
+    stamp = datetime.datetime.now(datetime.timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+    return f"{stamp}-{secrets.token_hex(3)}"
+
+
+def setup_of(paths):
+    """Each setup file's sha256 (None when missing) and the version over all of
+    them: sha256 of "path\0hash\0" sorted by path, first 12 hex digits."""
+    files = {}
+    for path in paths:
+        try:
+            files[str(path)] = hashlib.sha256(Path(path).read_bytes()).hexdigest()
+        except OSError:
+            files[str(path)] = None
+    digest = hashlib.sha256()
+    for path in sorted(files):
+        digest.update(f"{path}\0{files[path] or '<missing>'}\0".encode())
+    return {"version": digest.hexdigest()[:12], "files": files}
+
+
+def write_record(record):
+    """Best effort: a run record that can't be written never stops a team."""
+    try:
+        root = runs_root()
+        root.mkdir(parents=True, exist_ok=True)
+        path = root / f"{record['run_id']}.json"
+        temporary = path.with_suffix(".tmp")
+        temporary.write_text(json.dumps(record, indent=2))
+        temporary.replace(path)
+    except OSError:
+        pass
+
+
+def end_record(team, outcome, log):
+    """Add how the run ended to its record (herdr-team-watch, at finish or stop)."""
+    if "run_id" not in team:
+        return
+    try:
+        record = json.loads((runs_root() / f"{team['run_id']}.json").read_text())
+    except (OSError, ValueError):
+        return
+    record["outcome"] = {**outcome, "ended_at": utc_now()}
+    record["log"] = log
+    write_record(record)
+
+
+# The pane metadata token that tells the GUI a role is blocked.
+WAITING_SOURCE = "herdr-team"
+WAITING_TOKEN = "team_waiting"
+
+
+def create(workspace_id, branch, task, flow, members, worktree, setup_files=(), team_name=None):
+    """Write a new team directory and the run's lasting record; return the
+    directory. `flow` is herdr_flow.parse's {start, stages, limits};
+    `setup_files` are the files that shaped the team (team file, role files,
+    launcher settings), for the setup version; `team_name` is the team file's
+    name (`tdd-team`)."""
     directory = Path(tempfile.mkdtemp(prefix=f"{workspace_id.replace(':', '-')}-", dir=runtime_root()))
     team = {
+        "run_id": new_run_id(),
+        "setup": setup_of(setup_files),
         "workspace_id": workspace_id,
         "branch": branch,
         "task": task,
         "flow": flow,
         "members": members,
-        "review_rounds": review_rounds,
+        "worktree": worktree,
     }
     (directory / "team.json").write_text(json.dumps(team, indent=2))
-    save_state(directory, {"active": flow[0], "rounds": 0, "done": False, "summary": "", "log": []})
+    write_record({
+        "run_id": team["run_id"],
+        "team": team_name,
+        "started_at": utc_now(),
+        "setup": team["setup"],
+        "workspace_id": workspace_id,
+        "branch": branch,
+        "task": task,
+        "worktree": worktree,
+        "roles": list(members),
+        "outcome": None,
+    })
+    # stage: whose turn it is (None until the orchestrator starts the team);
+    # events: what the stage's role reported, for the orchestrator to act on.
+    save_state(directory, {"stage": None, "events": [], "counts": {}, "done": False, "stopped": None,
+                           "summary": "", "waiting": None, "log": []})
     return directory
 
 
@@ -81,17 +167,11 @@ def clean(text, limit):
     return text if len(text) <= limit else text[: limit - 1] + "…"
 
 
-def is_feedback(flow, sender, recipient):
-    """A message back to an earlier role is a review round."""
-    return flow.index(recipient) < flow.index(sender)
-
-
-def notify(title, body, urgent=False):
-    """A desktop notification; best effort, never through a shell."""
+def notify(title, body):
+    """A desktop notification, at normal urgency (no sound); best effort,
+    never through a shell."""
     body = clean(body, MAX_NOTE).replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
     command = ["notify-send", "--app-name=Herdr", clean(title, 100), body]
-    if urgent:
-        command.insert(1, "--urgency=critical")
     try:
         subprocess.run(command, timeout=5, check=False, capture_output=True)
     except (OSError, subprocess.TimeoutExpired):

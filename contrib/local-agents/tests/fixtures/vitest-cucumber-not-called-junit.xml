@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<testsuites name="vitest tests" tests="1" failures="1" errors="0" time="0">
+    <testsuite name="src/totals.test.js" timestamp="2026-10-17T09:29:27.902Z" hostname="h" tests="1" failures="1" errors="0" skipped="0" time="0">
+        <testcase classname="src/totals.test.js" name="src/totals.test.js" time="0">
+            <failure message="Scenario: An empty invoice is rejected was not called" type="ScenarioNotCalledError">
+ScenarioNotCalledError: Scenario: An empty invoice is rejected was not called
+            </failure>
+        </testcase>
+    </testsuite>
+</testsuites>

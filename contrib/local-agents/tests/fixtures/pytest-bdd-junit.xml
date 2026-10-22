@@ -1,0 +1,33 @@
+<?xml version="1.0" encoding="utf-8"?><testsuites name="pytest tests"><testsuite name="pytest" errors="0" failures="2" skipped="0" tests="2" time="0.035" timestamp="2026-10-17T11:29:31.531893+02:00" hostname="h"><testcase classname="tests.step_defs.test_totals" name="test_totals_are_rounded_to_cents" time="0.001"><failure message="assert 0 == 0.3">fixturefunc = &lt;function _ at 0x7433ad767480&gt;
+request = &lt;FixtureRequest for &lt;Function test_totals_are_rounded_to_cents&gt;&gt;
+kwargs = {'ctx': {'lines': [0.1, 0.2], 'result': 0}}
+
+    def call_fixture_func(
+        fixturefunc: _FixtureFunc[FixtureValue], request: FixtureRequest, kwargs
+    ) -&gt; FixtureValue:
+        if inspect.isgeneratorfunction(fixturefunc):
+            fixturefunc = cast(Callable[..., Generator[FixtureValue]], fixturefunc)
+            generator = fixturefunc(**kwargs)
+            try:
+                fixture_result = next(generator)
+            except StopIteration:
+                raise ValueError(f"{request.fixturename} did not yield a value") from None
+            finalizer = functools.partial(_teardown_yield_fixture, fixturefunc, generator)
+            request.addfinalizer(finalizer)
+        else:
+            fixturefunc = cast(Callable[..., FixtureValue], fixturefunc)
+&gt;           fixture_result = fixturefunc(**kwargs)
+                             ^^^^^^^^^^^^^^^^^^^^^
+
+.venv/lib/python3.14/site-packages/_pytest/fixtures.py:1005: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+ctx = {'lines': [0.1, 0.2], 'result': 0}
+
+    @then("the total is 0.30")
+&gt;   def _(ctx): assert ctx["result"] == 0.3
+                ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E   assert 0 == 0.3
+
+tests/step_defs/test_totals.py:16: AssertionError</failure></testcase><testcase classname="tests.step_defs.test_totals" name="test_an_empty_invoice_is_rejected" time="0.000"><failure message="pytest_bdd.exceptions.StepDefinitionNotFoundError: Step definition is not found: Given &quot;an invoice with no lines&quot;. Line 10 in scenario &quot;An empty invoice is rejected&quot; in the feature &quot;/repo/features/totals.feature&quot;">E   pytest_bdd.exceptions.StepDefinitionNotFoundError: Step definition is not found: Given "an invoice with no lines". Line 10 in scenario "An empty invoice is rejected" in the feature "/repo/features/totals.feature"
+All traceback entries are hidden. Pass `--full-trace` to see hidden and internal frames.</failure></testcase></testsuite></testsuites>
