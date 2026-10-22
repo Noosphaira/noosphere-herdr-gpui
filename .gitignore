@@ -26,3 +26,7 @@ id_ed25519*
 
 # Machine-local mise overrides.
 mise.local.toml
+
+# Python bytecode caches, written whenever the local-agents scripts run.
+__pycache__/
+*.pyc
