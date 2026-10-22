@@ -2,7 +2,7 @@
 //! the latest projection only: it never queries the daemon, touches disk, or
 //! starts a process.
 
-use super::{HerdrWindow, PressedLink};
+use super::HerdrWindow;
 use crate::{
     CheckForUpdates, GUI_VERSION, Minimize, PlaySound, RunCommand, ShowHerdrNotDetected,
     ShowUpdatePreview,
@@ -381,36 +381,7 @@ impl Render for HerdrWindow {
                                     move |event: &MouseMoveEvent, phase, _, cx| {
                                         if phase == DispatchPhase::Capture {
                                             entity.update(cx, |this, cx| {
-                                                // Window-wide, so leaving the terminal
-                                                // drops the underline too.
-                                                this.hover_link(
-                                                    event.position,
-                                                    event.modifiers,
-                                                    cx,
-                                                );
-                                                if this.scrollbar_mouse_move(event, cx)
-                                                    || this.split_mouse_move(event, cx)
-                                                    || this.terminal_mouse_move(event, cx)
-                                                {
-                                                    cx.stop_propagation();
-                                                    return;
-                                                }
-                                                if this.pressed_terminal_link.as_ref().is_some_and(
-                                                    |PressedLink { position, .. }| {
-                                                        (event.position.x - position.x).abs()
-                                                            > px(4.)
-                                                            || (event.position.y - position.y).abs()
-                                                                > px(4.)
-                                                    },
-                                                ) {
-                                                    this.pressed_terminal_link = None;
-                                                }
-                                                // A drag that leaves the terminal keeps
-                                                // selecting, and hover work elsewhere stays
-                                                // out of the gesture.
-                                                if this.extend_selection(event.position, cx) {
-                                                    cx.stop_propagation();
-                                                }
+                                                this.captured_mouse_move(event, cx)
                                             });
                                         }
                                     },
