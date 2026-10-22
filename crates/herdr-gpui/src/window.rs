@@ -21,6 +21,7 @@ mod lifecycle;
 mod links;
 pub(crate) use links::PressedLink;
 mod mouse;
+mod pane_marks;
 mod pending_input;
 mod prefix;
 mod regions;

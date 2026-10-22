@@ -2,7 +2,7 @@
 //! Shift keeps a gesture local; a forwarded drag stays with its pressed target.
 //! A pane's right-click reaches the application only when Herdr routes it there.
 
-use super::HerdrWindow;
+use super::{HerdrWindow, PressedLink};
 use crate::{
     connection::ConnectionBridge,
     navigation::NavigationTarget,
@@ -10,7 +10,7 @@ use crate::{
 };
 use gpui::{
     Context, CursorStyle, Modifiers, MouseButton, MouseDownEvent, MouseMoveEvent, MouseUpEvent,
-    Pixels, Point, Window,
+    Pixels, Point, Window, px,
 };
 use herdr_client::{
     Method,
@@ -649,6 +649,37 @@ impl HerdrWindow {
                 self.local_error = Some(format!("Pane resize not sent: {error}"));
                 cx.notify();
             }
+        }
+    }
+}
+
+impl HerdrWindow {
+    /// Movement anywhere in the window, captured before any element can stop
+    /// propagation of a drag-away event.
+    pub(super) fn captured_mouse_move(&mut self, event: &MouseMoveEvent, cx: &mut Context<Self>) {
+        // Window-wide, so leaving the terminal drops the underline too.
+        self.hover_link(event.position, event.modifiers, cx);
+        if self.scrollbar_mouse_move(event, cx)
+            || self.split_mouse_move(event, cx)
+            || self.terminal_mouse_move(event, cx)
+        {
+            cx.stop_propagation();
+            return;
+        }
+        if self
+            .pressed_terminal_link
+            .as_ref()
+            .is_some_and(|PressedLink { position, .. }| {
+                (event.position.x - position.x).abs() > px(4.)
+                    || (event.position.y - position.y).abs() > px(4.)
+            })
+        {
+            self.pressed_terminal_link = None;
+        }
+        // A drag that leaves the terminal keeps selecting, and hover work
+        // elsewhere stays out of the gesture.
+        if self.extend_selection(event.position, cx) {
+            cx.stop_propagation();
         }
     }
 }
