@@ -16,6 +16,7 @@ FIXTURES = Path(__file__).resolve().parent / "fixtures"
 spec = importlib.util.spec_from_file_location("team_tools", HERE / "team-tools" / "team_tools.py")
 tt = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(tt)
+sys.path.insert(0, str(HERE / "team-tools"))
 
 BRIEF = """# Brief
 
@@ -24,6 +25,9 @@ Invoices show a currency.
 
 ## FEATURES
 - features/currency.feature
+
+## ENTRY POINTS
+- invoice.print_invoice
 
 ## GUARDRAILS
 No new dependencies.
@@ -152,7 +156,7 @@ class BriefTest(RepoCase):
         self.write("features/currency.feature", FEATURE)
 
     def test_good_brief(self):
-        self.assertEqual(tt.lint_brief(self.repo, BRIEF), ([], []))
+        self.assertEqual(tt.lint_brief(self.repo, BRIEF), [])
         scenarios, _ = tt.ticket_scenarios(self.repo, BRIEF)
         self.assertEqual([s["acs"] for s in scenarios], [[1], [2]])
         self.assertEqual(tt.owned_paths(BRIEF), ["src/", "tests/"])
@@ -162,7 +166,7 @@ class BriefTest(RepoCase):
         brief = brief.replace("- src/\n", "- nowhere/deep/x/\n")
         brief = brief.replace("python3 -m pytest", "no-such-runner")
         self.write("features/currency.feature", FEATURE.replace("@AC-2", "@AC-3"))
-        problems, _ = tt.lint_brief(self.repo, brief)
+        problems = tt.lint_brief(self.repo, brief)
         text = "\n".join(problems)
         self.assertIn("GUARDRAILS", text)
         self.assertIn("numbered AC-1..AC-2", text)
@@ -170,7 +174,7 @@ class BriefTest(RepoCase):
         self.assertIn("no-such-runner", text)
 
     def test_done_when_is_gone(self):
-        problems, _ = tt.lint_brief(self.repo, BRIEF + "\n## DONE WHEN\n- AC-1: x\n")
+        problems = tt.lint_brief(self.repo, BRIEF + "\n## DONE WHEN\n- AC-1: x\n")
         self.assertTrue(any("replaced by FEATURES" in p for p in problems), problems)
 
     def test_scenario_problems(self):
@@ -195,7 +199,7 @@ class BriefTest(RepoCase):
             "    And c",
             "    Then d",
         ]) + "\n")
-        text = "\n".join(tt.lint_brief(self.repo, BRIEF)[0])
+        text = "\n".join(tt.lint_brief(self.repo, BRIEF))
         self.assertIn("needs exactly one @AC-n tag, has 2", text)
         self.assertIn("needs exactly one @AC-n tag, has 0", text)
         self.assertIn("no Then step", text)
@@ -205,7 +209,7 @@ class BriefTest(RepoCase):
 
     def test_missing_feature_file(self):
         (self.repo / "features/currency.feature").unlink()
-        text = "\n".join(tt.lint_brief(self.repo, BRIEF)[0])
+        text = "\n".join(tt.lint_brief(self.repo, BRIEF))
         self.assertIn("feature file features/currency.feature not found", text)
 
     def test_only_new_or_changed_scenarios_count(self):
@@ -220,14 +224,14 @@ class BriefTest(RepoCase):
     def test_too_many_acs(self):
         many = "Feature: Many\n" + "".join(f"  @AC-{i}\n  Scenario: thing {i}\n    When {i}\n    Then {i}\n" for i in range(1, 10))
         self.write("features/currency.feature", many)
-        problems, _ = tt.lint_brief(self.repo, BRIEF)
+        problems = tt.lint_brief(self.repo, BRIEF)
         self.assertTrue(any("at most 8" in p for p in problems), problems)
 
-    def test_open_questions(self):
-        _, questions = tt.lint_brief(self.repo, BRIEF + "\n## OPEN QUESTIONS\n- Which currencies?\n")
-        self.assertEqual(questions, ["- Which currencies?"])
-        _, none = tt.lint_brief(self.repo, BRIEF + "\n## OPEN QUESTIONS\n- none\n")
-        self.assertEqual(none, [])
+    def test_open_questions_are_problems(self):
+        problems = tt.lint_brief(self.repo, BRIEF + "\n## OPEN QUESTIONS\n- Which currencies?\n")
+        self.assertEqual(len(problems), 1)
+        self.assertIn("record it under DECISIONS", problems[0])
+        self.assertEqual(tt.lint_brief(self.repo, BRIEF + "\n## OPEN QUESTIONS\n- none\n"), [])
 
 
 class GherkinTest(unittest.TestCase):
@@ -336,6 +340,74 @@ class TraceTest(RepoCase):
                          [("rejects a missing currency", [2]), ("AC-1 prints", [1]), ("handles %s", [])])
 
 
+class RedJudgeTest(RepoCase):
+    """red-check's verdicts, from JUnit cases made up for the tests."""
+
+    def setUp(self):
+        super().setUp()
+        import team_red
+        self.red = team_red
+        self.write("tests/test_invoice.py", "def test_old():\n    assert True\n\n\n"
+                   "def helper():\n    return print_invoice(1)\n\n\n"
+                   "# AC-1\ndef test_prints_code():\n    assert helper() == 'EUR 1'\n\n\n"
+                   "# AC-1\ndef test_no_code_when_empty():\n    assert print_invoice(0) == ''\n\n\n"
+                   "# AC-2\ndef test_total_only():\n    assert total(1) == 1\n")
+        self.commit("red: currency")
+
+    def case(self, name, status="failed", kind="assertion"):
+        return {"file": "tests.test_invoice", "name": name, "status": status, "kind": kind if status == "failed" else None,
+                "message": "", "location": ""}
+
+    def judged(self, cases, names=("print_invoice",)):
+        tests = self.red.new_tests(self.repo, ["tests/test_invoice.py"], tt.base(self.repo))
+        ticket = [{"file": "features/currency.feature", "name": "x", "acs": [1, 2]}]
+        verdicts, problems = self.red.judge(self.repo, self.info(), cases, {}, ticket, tests, list(names))
+        return {v["name"]: v["verdict"] for v in verdicts}, problems
+
+    def test_only_new_tests_are_judged_and_levels_checked(self):
+        verdicts, problems = self.judged([self.case("test_old", "passed"), self.case("test_prints_code"),
+                                          self.case("test_no_code_when_empty", "passed"), self.case("test_total_only")])
+        self.assertNotIn("test_old", verdicts)
+        self.assertEqual(verdicts["test_prints_code"], "red ok")
+        self.assertTrue(verdicts["test_no_code_when_empty"].startswith("passes against the stub"))
+        self.assertTrue(verdicts["test_total_only"].startswith("WRONG LEVEL"))
+        # AC-2's only test is at the wrong level, so nothing fails for it.
+        self.assertEqual(problems, ["AC-2: no test or scenario fails for it"])
+
+    def test_a_pass_blocks_when_its_criterion_has_no_failing_test(self):
+        verdicts, _ = self.judged([self.case("test_prints_code", "passed"), self.case("test_no_code_when_empty", "passed"),
+                                   self.case("test_total_only")], names=("print_invoice", "total"))
+        self.assertTrue(verdicts["test_prints_code"].startswith("NOT RED"))
+        self.assertTrue(self.red.blocking({"verdict": verdicts["test_prints_code"]}))
+
+    def test_no_entry_points_is_a_problem(self):
+        _, problems = self.judged([], names=())
+        self.assertIn("ENTRY POINTS", problems[0])
+
+    def test_blocks_end_with_their_indentation(self):
+        lines = ["describe('x', () => {", "  it('a', () => {", "    expect(f()).toBe(1)", "  })", "  const y = 2",
+                 "def test_b():", "    pass", "", "SETTING = 1"]
+        spans = self.red.blocks(lines, [2, 6])
+        self.assertEqual(spans, {2: (2, 4), 6: (6, 7)})
+
+    def test_entry_points_from_the_brief(self):
+        text = "## ENTRY POINTS\n- `agora.domain.room.create_room()` (opens a room)\n- Room.close\n- agora run\n"
+        self.assertEqual(self.red.entry_points(text), ["create_room", "close", "agora"])
+
+
+class ReviewCheckTest(RepoCase):
+    def test_untouched_owned_paths_need_a_reason(self):
+        brief = BRIEF.replace("- tests/\n", "- tests/\n- src/store/0009_rule.sql\n")
+        self.write("plan/brief.md", brief)
+        self.commit("plan: brief")
+        self.write("src/invoice.py", "def total(x):\n    return f'EUR {x}'\n")
+        self.commit("green: currency")
+        paths = tt.untouched(self.repo, brief)
+        self.assertEqual(paths, ["tests/", "src/store/0009_rule.sql"])
+        self.assertEqual(tt.unexplained(paths, "All done, check green."), paths)
+        self.assertEqual(tt.unexplained(paths, "src/store/0009_rule.sql: no storage needed"), ["tests/"])
+
+
 class GamingTest(RepoCase):
     def red(self):
         self.write("tests/test_currency.py", "# AC-1\ndef test_code():\n    assert total(1) == 'EUR 1'\n")
@@ -425,7 +497,7 @@ class AllureTest(RepoCase):
                       "message": "", "location": "", "time": 0.01, "trace": ""})
         log = self.repo / "run.log"
         log.write_text("x")
-        out = tt.allure_export(self.repo, {**self.info(), "bdd": "vitest-cucumber"}, "red", cases, set(), log)
+        out = tt.team_allure.allure_export(self.repo, {**self.info(), "bdd": "vitest-cucumber"}, "red", cases, set(), log)
         results = {r["name"]: r for r in (json.loads(f.read_text()) for f in out.glob("*-result.json"))}
         self.assertEqual(set(results), {"Totals are rounded to cents", "An empty invoice is rejected", "test_old"})
         rounded = results["Totals are rounded to cents"]
@@ -438,7 +510,7 @@ class AllureTest(RepoCase):
         statuses = tt.last_results(self.repo)
         self.assertEqual(statuses["features/totals.feature::Totals are rounded to cents"], "failed")
         # The same test keeps its history id from run to run.
-        again = tt.allure_export(self.repo, {**self.info(), "bdd": "vitest-cucumber"}, "check", cases, set(), log)
+        again = tt.team_allure.allure_export(self.repo, {**self.info(), "bdd": "vitest-cucumber"}, "check", cases, set(), log)
         ids = lambda d: sorted(json.loads(f.read_text())["historyId"] for f in d.glob("*-result.json"))
         self.assertEqual(ids(out), ids(again))
 
@@ -457,9 +529,10 @@ class TeamReportTest(RepoCase):
             self.write(f".team/allure/{name}/run.json", json.dumps({"label": name.split("-")[-1], "time": stamp, "epoch": int(name[9:15]),
                                                                      "commit": "abcdef123", "worktree": str(self.repo)}))
         reports = self.repo / "reports"
-        old = tt.ALLURE, tt.REPORTS
-        tt.ALLURE, tt.REPORTS = fake, reports
-        self.addCleanup(lambda: setattr(tt, "ALLURE", old[0]) or setattr(tt, "REPORTS", old[1]))
+        old = tt.team_allure.ALLURE, tt.team_allure.REPORTS
+        allure = tt.team_allure
+        allure.ALLURE, allure.REPORTS = fake, reports
+        self.addCleanup(lambda: setattr(allure, "ALLURE", old[0]) or setattr(allure, "REPORTS", old[1]))
         env = os.environ.pop("HERDR_SANDBOX", None)
         self.addCleanup(lambda: env and os.environ.__setitem__("HERDR_SANDBOX", env))
         with contextlib.redirect_stdout(io.StringIO()):
@@ -536,6 +609,37 @@ class FactsTest(RepoCase):
     def test_python(self):
         info = self.info()
         self.assertEqual((info["stack"], info["runner"]), ("python", "pytest"))
+        self.assertEqual((info["python"], info["setup"]), (sys.executable, None))
+
+    def test_python_uses_the_repo_virtualenv(self):
+        self.write("uv.lock", "")
+        info = self.info()
+        venv = str(self.repo / ".venv" / "bin" / "python")
+        self.assertEqual((info["python"], info["setup"], info["package_manager"]), (venv, "uv sync --locked", "uv"))
+        self.assertEqual(tt.test_command(info, [], Path("/x.xml"))[0], venv)
+        self.assertIn("does not exist", tt.runner_problem(info))
+        os.makedirs(self.repo / ".venv" / "bin")
+        os.symlink(sys.executable, venv)
+        self.assertIsNone(self.info()["setup"])
+
+    def test_a_runner_that_cant_start_stops_the_tools(self):
+        info = {**self.info(), "python": "/nonexistent/python"}
+        with self.assertRaises(tt.ToolError) as raised:
+            tt.run_tests(self.repo, info, [])
+        self.assertIn("Do not work around this", str(raised.exception))
+
+
+class EvidenceTest(RepoCase):
+    """Result files must be the ones the tools wrote."""
+
+    def write_red(self, verdicts):
+        tt.team_dir(self.repo)
+        (self.repo / ".team" / "red.json").write_text(json.dumps(verdicts))
+
+    def test_passing_tests_marked_red_are_forged(self):
+        self.write_red([{"name": "t", "status": "passed", "verdict": "red ok"}])
+        self.assertIn("not written by red-check", tt.evidence_problems(self.repo)[0])
+
 
 
 if __name__ == "__main__":

@@ -1,41 +1,59 @@
 #!/usr/bin/env python3
-"""Keep a launched team moving. Started by herdr-launch, one per team.
+"""Run a launched team through its stages. Started by herdr-launch, one per team.
 
 Usage: herdr-team-watch <team-dir> [--session NAME]
 
-Every few seconds it looks at the role whose turn it is:
+This is the team's state machine (herdr_flow) at work, outside every
+sandbox. Agents only report; this decides:
 
-- idle without having handed off: after a grace period it reminds that agent
-  once to hand off (or to say it needs the user); if it stays idle after
-  that, it notifies the user;
-- blocked on an approval: it notifies the user;
-- `team done` run, or every agent gone: it exits.
+- it gives the task to the start stage's role;
+- on `team done` it makes sure everything is committed, runs the stage's
+  check inside the sandbox (herdr-sandbox, never on the host; the check
+  finds the role's summary in $TEAM_REPORT), and prompts
+  the role of the stage the team file names next with the summary, or with
+  the failed check's output; on `team findings` it sends them to the stage
+  the team file names; past a limit it stops the team; at `finish` it ends;
+- it reminds a role whose turn it is and that went idle without reporting,
+  once, then notifies the user;
+- it notifies the user when an agent is blocked on an approval, and clears
+  a `team blocked` mark once that agent works again after the user answered.
 
-It never hands work on by itself: only an agent decides its part is done.
+Every move goes into the state log, the run's record. Checks' full output
+goes to checks/ in the team directory.
 """
 
 import json
+import os
 import subprocess
 import sys
 import time
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+import herdr_flow  # noqa: E402
 import herdr_team  # noqa: E402
 
 POLL = 15
 GRACE = 90
 BLOCKED_GRACE = 30
 LIFETIME = 24 * 3600
+CHECK_TIMEOUT = 45 * 60
+# How much of a failed check's output the run record keeps.
+OUTPUT_TAIL = 2000
+SANDBOX = Path(__file__).resolve().parent / "herdr-sandbox"
+# A check runs as a plain sandboxed command: no herdr socket, no team.
+DROPPED_ENV = ("HERDR_SOCKET_PATH", "HERDR_PANE_ID", "HERDR_TEAM_ROLE", "HERDR_TEAM_BRANCH")
 
 
 def herdr(session, *args):
     command = ["herdr"] + (["--session", session] if session else []) + list(args)
     result = subprocess.run(command, capture_output=True, text=True, timeout=30)
-    try:
-        return json.loads(result.stdout).get("result") if result.returncode == 0 else None
-    except ValueError:
+    if result.returncode != 0:
         return None
+    try:
+        return json.loads(result.stdout).get("result") if result.stdout.strip() else {}
+    except ValueError:
+        return {}
 
 
 def status(session, pane):
@@ -46,66 +64,210 @@ def status(session, pane):
     return agent.get("agent_status", "unknown")
 
 
+def sandboxed(worktree, command, timeout, report=""):
+    """(exit code, output) of `command` run in the worktree's sandbox, with
+    the report it judges in $TEAM_REPORT."""
+    env = {k: v for k, v in os.environ.items() if k not in DROPPED_ENV}
+    env["TEAM_REPORT"] = report
+    try:
+        result = subprocess.run([str(SANDBOX), str(worktree), "--", "bash", "-c", command], env=env,
+                                capture_output=True, text=True, timeout=timeout, stdin=subprocess.DEVNULL)
+        return result.returncode, result.stdout + result.stderr
+    except subprocess.TimeoutExpired as error:
+        output = error.stdout.decode(errors="replace") if isinstance(error.stdout, bytes) else (error.stdout or "")
+        return 124, f"{output}\n(timed out after {timeout} s)"
+
+
+class Run:
+    def __init__(self, team_dir, session, sandboxed=sandboxed, herdr=herdr):
+        self.team_dir = Path(team_dir)
+        self.session = session
+        self.sandboxed = sandboxed
+        self.herdr = herdr
+        self.team = herdr_team.load(team_dir)
+        self.machine = herdr_flow.Machine(self.team["flow"], self.team["task"])
+        (self.team_dir / "checks").mkdir(exist_ok=True)
+
+    def prompt(self, role, text):
+        if self.herdr(self.session, "agent", "prompt", self.team["members"][role], text) is None:
+            herdr_team.log(self.team_dir, {"error": f"could not prompt {role}"})
+
+    def apply(self, move, event=None, counts=None):
+        """Record a move in the state, then tell whoever it concerns."""
+        branch = self.team["branch"]
+        ends = "stop" in move or move["to"] == herdr_flow.FINISH
+        with herdr_team.state(self.team_dir) as current:
+            if event is not None and current["events"][:1] == [event]:
+                current["events"].pop(0)
+            if counts is not None:
+                current["counts"] = counts
+            entry = {"time": time.time(), "from_stage": current["stage"]}
+            if "stop" in move:
+                current["stopped"] = move["stop"]
+                entry["stopped"] = move["stop"]
+            elif move["to"] == herdr_flow.FINISH:
+                current["done"] = True
+                current["summary"] = (event or {}).get("text", "")
+                entry["to_stage"] = herdr_flow.FINISH
+            else:
+                current["stage"] = move["to"]
+                entry.update(to_stage=move["to"], role=move["role"])
+            if event:
+                entry.update(kind=event["kind"], by=event["role"], text=event["text"][:200])
+            current["log"].append(entry)
+            waiting = current.get("waiting")
+            if ends:
+                current["waiting"] = None
+                log = list(current["log"])
+        if "stop" in move:
+            herdr_team.end_record(self.team, {"result": "stopped", "reason": move["stop"]}, log)
+        elif ends:
+            herdr_team.end_record(self.team, {"result": "finished", "summary": (event or {}).get("text", "")}, log)
+        if "stop" in move:
+            herdr_team.notify(f"Team {branch} stopped", move["stop"])
+        elif move["to"] == herdr_flow.FINISH:
+            herdr_team.notify(f"Team finished: {branch}", (event or {}).get("text", "") or "done")
+        else:
+            self.prompt(move["role"], move["message"])
+        if ends and waiting:
+            self.unmark(waiting["role"])
+
+    def unmark(self, role):
+        self.herdr(self.session, "pane", "report-metadata", self.team["members"][role], "--source",
+                   herdr_team.WAITING_SOURCE, "--clear-token", herdr_team.WAITING_TOKEN)
+
+    def drop(self, event, note=None):
+        with herdr_team.state(self.team_dir) as current:
+            if current["events"][:1] == [event]:
+                current["events"].pop(0)
+            if note:
+                current["log"].append({"time": time.time(), **note})
+
+    def handle(self, current, event):
+        """Act on the oldest report."""
+        if event["stage"] != current["stage"]:
+            self.drop(event)
+            return
+        counts = dict(current["counts"])
+        view = {**current, "counts": counts}
+        if event["kind"] == "findings":
+            self.apply(self.machine.findings(view, event["text"]), event, counts)
+            return
+        worktree = self.team["worktree"]
+        code, output = self.sandboxed(worktree, "git status --porcelain", 120)
+        if code != 0:
+            self.apply({"stop": f"the sandbox could not run git status (exit {code}): {output.strip()[:300]}"}, event)
+            return
+        if output.strip():
+            self.drop(event, {"uncommitted": event["role"], "stage": event["stage"]})
+            self.prompt(event["role"], "[team] Your `team done` was not accepted: there are uncommitted changes "
+                                       f"(git status --porcelain):\n{output.strip()[:1500]}\nCommit them (or remove "
+                                       "what should not be there), then run `team done \"<summary>\"` again.")
+            return
+        decision = self.machine.done(view, event["text"])
+        if "check" in decision:
+            started = time.time()
+            code, output = self.sandboxed(worktree, decision["check"], CHECK_TIMEOUT, event["text"])
+            number = len(list((self.team_dir / "checks").glob("*.log"))) + 1
+            log = self.team_dir / "checks" / f"{number:03d}-{event['stage']}.log"
+            log.write_text(f"$ {decision['check']}\n{output}\n(exit {code}, {time.time() - started:.0f} s)\n")
+            entry = {"check": decision["check"], "stage": event["stage"], "exit": code,
+                     "seconds": round(time.time() - started), "output": log.name}
+            # the team directory goes at reboot; the run record keeps why a check failed
+            if code != 0:
+                entry["output_tail"] = output[-OUTPUT_TAIL:]
+            herdr_team.log(self.team_dir, entry)
+            decision = self.machine.checked(view, event["text"], code == 0, output)
+        self.apply(decision, event, counts)
+
+    def start(self):
+        if herdr_team.read_state(self.team_dir)["stage"] is None:
+            self.apply(self.machine.first())
+
+    def run(self):
+        self.start()
+        started = time.monotonic()
+        marker = None
+        worked = reminded = told_user = told_blocked = False
+        idle_since = blocked_since = None
+        waited = None
+        while time.monotonic() - started < LIFETIME:
+            current = herdr_team.read_state(self.team_dir)
+            if current["done"] or current.get("stopped"):
+                return
+            statuses = {role: status(self.session, pane) for role, pane in self.team["members"].items()}
+            if all(value == "gone" for value in statuses.values()):
+                return
+            if current["events"]:
+                self.handle(current, current["events"][0])
+                continue
+
+            waiting = current.get("waiting")
+            if waiting:
+                key = (waiting["role"], waiting["time"])
+                asked = statuses.get(waiting["role"], "gone")
+                if waited is None or waited[0] != key:
+                    waited = (key, False)
+                if asked in ("idle", "done", "gone"):
+                    waited = (key, True)
+                elif asked in ("working", "blocked") and waited[1]:
+                    # A teammate's message also wakes it; only the user answers.
+                    messaged = any(e.get("ask") == key[0] or e.get("answer") == key[0] or e.get("role") == key[0]
+                                   for e in current["log"] if e.get("time", 0) > key[1])
+                    if not messaged:
+                        self.clear_waiting(key)
+                        waiting = None
+
+            role = self.machine.role(current["stage"])
+            moves = sum(1 for entry in current["log"] if "to_stage" in entry or "uncommitted" in entry)
+            if (current["stage"], moves) != marker:
+                marker = (current["stage"], moves)
+                worked = reminded = told_user = told_blocked = False
+                idle_since = blocked_since = None
+            state = statuses.get(role, "gone")
+            now = time.monotonic()
+            if state == "working":
+                worked = True
+                idle_since = blocked_since = None
+            elif state == "blocked":
+                blocked_since = blocked_since or now
+                if not told_blocked and now - blocked_since >= BLOCKED_GRACE:
+                    herdr_team.notify(f"Team {self.team['branch']}: {role} needs you", "It is waiting for your approval.")
+                    told_blocked = True
+            elif state in ("idle", "done") and worked and not (waiting and waiting["role"] == role):
+                idle_since = idle_since or now
+                if now - idle_since >= GRACE:
+                    if not reminded:
+                        self.prompt(role, self.reminder(current["stage"]))
+                        reminded, idle_since = True, None
+                    elif not told_user:
+                        herdr_team.notify(f"Team {self.team['branch']}: {role} stopped",
+                                          "It went idle without reporting. Check its pane.")
+                        told_user = True
+            time.sleep(POLL)
+
+    def reminder(self, stage):
+        findings = ", or `team findings \"<numbered findings>\"`" if self.machine.allows_findings(stage) else ""
+        return (f"[team reminder] It is your turn (stage {stage}) and you stopped without reporting. When your "
+                f"part is done and committed, run `team done \"<summary>\"`{findings}. If you are blocked, "
+                "`team blocked \"<what failed>\"`.")
+
+    def clear_waiting(self, key):
+        """The user answered: drop the block and the pane's mark."""
+        with herdr_team.state(self.team_dir) as current:
+            waiting = current.get("waiting")
+            if not waiting or (waiting["role"], waiting["time"]) != key:
+                return
+            current["waiting"] = None
+        self.unmark(key[0])
+
+
 def main():
     args = sys.argv[1:]
     if not args:
         sys.exit(__doc__.strip())
-    team_dir = Path(args[0])
     session = args[2] if args[1:2] == ["--session"] and len(args) > 2 else None
-    team = herdr_team.load(team_dir)
-    branch = team["branch"]
-    started = time.monotonic()
-
-    # What has been seen since the active role last changed.
-    marker = None
-    worked = nudged = told_user = told_blocked = False
-    idle_since = blocked_since = None
-
-    while time.monotonic() - started < LIFETIME:
-        current = herdr_team.read_state(team_dir)
-        if current["done"]:
-            return
-        statuses = {role: status(session, pane) for role, pane in team["members"].items()}
-        if all(value == "gone" for value in statuses.values()):
-            return
-
-        active = current["active"]
-        now_marker = (active, len(current["log"]))
-        if now_marker != marker:
-            marker = now_marker
-            worked = nudged = told_user = told_blocked = False
-            idle_since = blocked_since = None
-
-        state = statuses.get(active, "gone")
-        now = time.monotonic()
-        if state == "working":
-            worked = True
-            idle_since = blocked_since = None
-        elif state == "blocked":
-            blocked_since = blocked_since or now
-            if not told_blocked and now - blocked_since >= BLOCKED_GRACE:
-                herdr_team.notify(f"Team {branch}: {active} needs you", "It is waiting for your approval.", urgent=True)
-                told_blocked = True
-        elif state in ("idle", "done") and worked:
-            idle_since = idle_since or now
-            if now - idle_since >= GRACE:
-                flow = team["flow"]
-                index = flow.index(active)
-                follow = (
-                    f"`team send {flow[index + 1]} \"<what you did and where>\"`"
-                    if index + 1 < len(flow)
-                    else "`team done \"<summary>\"`"
-                )
-                if not nudged:
-                    herdr(session, "agent", "prompt", team["members"][active],
-                          "[team reminder] You stopped without handing off. If your part is finished, "
-                          f"run {follow}. If you need the user, say so in one line and stop.")
-                    nudged, idle_since = True, None
-                elif not told_user:
-                    herdr_team.notify(f"Team {branch}: {active} stopped",
-                                      "It went idle without handing off. Check its pane.", urgent=True)
-                    told_user = True
-        time.sleep(POLL)
+    Run(args[0], session).run()
 
 
 if __name__ == "__main__":

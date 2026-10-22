@@ -56,6 +56,8 @@ ENV_PASSTHROUGH = [
     "TERM", "COLORTERM", "TERM_PROGRAM", "LANG", "LANGUAGE", "LC_ALL", "LC_CTYPE",
     "LC_MESSAGES", "TZ", "USER", "LOGNAME", "SHELL",
     "HERDR_ENV", "HERDR_PANE_ID", "HERDR_TAB_ID", "HERDR_WORKSPACE_ID",
+    # The report a team's stage check judges (herdr-team-watch).
+    "TEAM_REPORT",
 ]
 
 SANDBOX_SOCKET_DIR = "/run/herdr-filter"
@@ -82,13 +84,21 @@ def bind_args(flag, source, target=None):
     return [flag, str(source), str(target or source)]
 
 
-def sandbox_env(agent, role, branch):
+def run_env(team):
+    """The team run's id and setup version, so agents can tag their traces
+    (README "Runs and traces"). Empty for a team from before run ids."""
+    if "run_id" not in team:
+        return {}
+    return {"HERDR_TEAM_RUN": team["run_id"], "HERDR_SETUP_VERSION": team["setup"]["version"]}
+
+
+def sandbox_env(agent, role, branch, run=""):
     """`sandbox_env` from the launcher settings, placeholders filled in."""
     settings = herdr_grants.read_yaml(SETTINGS, {})
     env = settings.get("sandbox_env") if isinstance(settings, dict) else None
     if not isinstance(env, dict):
         return {}
-    values = {"agent": agent, "role": role or "", "branch": branch or ""}
+    values = {"agent": agent, "role": role or "", "branch": branch or "", "run": run or ""}
     out = {}
     for name, value in env.items():
         try:
@@ -98,7 +108,7 @@ def sandbox_env(agent, role, branch):
     return out
 
 
-def build_bwrap(worktree, common_git, grants, command, filter_dir, role=None, branch=None, prompt=None):
+def build_bwrap(worktree, common_git, grants, command, filter_dir, role=None, branch=None, prompt=None, run=None):
     executable = Path(shutil.which(command[0]) or command[0]).resolve()
     if not executable.is_file():
         die(f"command not found: {command[0]}")
@@ -171,10 +181,13 @@ def build_bwrap(worktree, common_git, grants, command, filter_dir, role=None, br
         args += ["--setenv", "HERDR_TEAM_ROLE", role]
     if branch:
         args += ["--setenv", "HERDR_TEAM_BRANCH", branch]
+    for name, value in (run or {}).items():
+        args += ["--setenv", name, value]
     args += ["--setenv", "HOME", str(HOME), "--setenv", "PATH", ":".join(path_dirs)]
     args += ["--setenv", "HERDR_SANDBOX", "1"]
     agent = executable.name if executable.name in herdr_agents.AGENTS else herdr_agents.DEFAULT
-    for name, value in {**sandbox_env(agent, role, branch), **herdr_agents.OFFLINE_ENV}.items():
+    run_id = (run or {}).get("HERDR_TEAM_RUN", "")
+    for name, value in {**sandbox_env(agent, role, branch, run_id), **herdr_agents.OFFLINE_ENV}.items():
         args += ["--setenv", name, value]
     if filter_dir:
         args += ["--setenv", "HERDR_SOCKET_PATH", f"{SANDBOX_SOCKET_DIR}/herdr.sock"]
@@ -234,12 +247,14 @@ def main():
     elif role:
         die("a team member needs herdr's socket and pane; run it in a herdr pane")
 
-    branch = prompt = None
+    branch = prompt = run = None
     if team_dir:
-        branch = herdr_team.load(team_dir).get("branch")
+        team = herdr_team.load(team_dir)
+        branch = team.get("branch")
+        run = run_env(team)
         candidate = Path(team_dir) / "prompts" / f"{role}.md"
         prompt = candidate if candidate.is_file() else None
-    bwrap = build_bwrap(worktree, common_git, grants, command, filter_dir, role, branch, prompt)
+    bwrap = build_bwrap(worktree, common_git, grants, command, filter_dir, role, branch, prompt, run)
     if filtered:
         bwrap = herdr_netfilter.wrap(bwrap)
     child = subprocess.Popen(bwrap)

@@ -7,16 +7,17 @@ src="$(cd "$(dirname "$0")" && pwd)"
 dest="$HOME/.local/share/herdr-launch"
 mkdir -p "$dest" "$HOME/.local/bin" "$HOME/.config/herdr-launch/teams"
 install -m 0755 "$src/herdr-sandbox" "$src/herdr-launch" "$src/herdr-team-watch" "$src/herdr-teams" "$src/herdr-repos" "$src/team" "$dest/"
-install -m 0644 "$src/herdr_agents.py" "$src/herdr_grants.py" "$src/herdr_filter.py" "$src/herdr_netfilter.py" "$src/herdr_team.py" "$dest/"
+install -m 0644 "$src/herdr_agents.py" "$src/herdr_grants.py" "$src/herdr_filter.py" "$src/herdr_netfilter.py" "$src/herdr_team.py" "$src/herdr_flow.py" "$dest/"
 ln -sf "$dest/herdr-sandbox" "$HOME/.local/bin/herdr-sandbox"
 ln -sf "$dest/herdr-launch" "$HOME/.local/bin/herdr-launch"
 ln -sf "$dest/herdr-teams" "$HOME/.local/bin/herdr-teams"
 ln -sf "$dest/herdr-repos" "$HOME/.local/bin/herdr-repos"
-# Role tools (team-tools/team_tools.py), one link per tool name. Agents get
-# them by granting $dest/team-tools read-only and adding its bin to `path` in
-# global.yaml.
+# Role tools (team-tools/team_tools.py and its modules), one link per tool
+# name. Agents get them by granting $dest/team-tools read-only and adding its
+# bin to `path` in global.yaml.
 mkdir -p "$dest/team-tools/bin"
 install -m 0755 "$src/team-tools/team_tools.py" "$dest/team-tools/"
+install -m 0644 "$src/team-tools/team_repo.py" "$src/team-tools/team_gherkin.py" "$src/team-tools/team_allure.py" "$src/team-tools/team_red.py" "$dest/team-tools/"
 for tool in $(python3 -c 'import sys; sys.path.insert(0, sys.argv[1]); import team_tools; print(*team_tools.TOOLS)' "$src/team-tools"); do
   ln -sfn ../team_tools.py "$dest/team-tools/bin/$tool"
 done

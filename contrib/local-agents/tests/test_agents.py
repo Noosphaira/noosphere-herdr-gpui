@@ -131,6 +131,14 @@ class SandboxTest(unittest.TestCase):
         self.assertEqual(env["HERDR_TEAM_BRANCH"], "b1")
         self.assertEqual(env["HERDR_TEAM_ROLE"], "coder")
 
+    def test_a_team_run_gives_its_id_and_setup_version_to_the_agent(self):
+        # README "Runs and traces"
+        run = {"HERDR_TEAM_RUN": "20261021T200000Z-abc123", "HERDR_SETUP_VERSION": "0123456789ab"}
+        env = self.setenv(self.bwrap(role="coder", branch="b1", run=run))
+        self.assertEqual(env["HERDR_TEAM_RUN"], "20261021T200000Z-abc123")
+        self.assertEqual(env["HERDR_SETUP_VERSION"], "0123456789ab")
+        self.assertNotIn("HERDR_TEAM_RUN", self.setenv(self.bwrap(role="coder", branch="b1")))
+
     def test_offline_env_wins_over_settings_env(self):
         self.settings.write_text("sandbox_env:\n  PI_OFFLINE: '0'\n")
         self.assertEqual(self.setenv(self.bwrap())["PI_OFFLINE"], "1")
@@ -190,6 +198,18 @@ class LaunchAgentTest(unittest.TestCase):
         self.assertEqual(self.agent("agent: opencode\n", "agent: pi\n")[0], "opencode")
         self.assertEqual(self.agent("", "agent: pi\npi_command: /opt/pi\n"), ("pi", ["pi", "coder", "/opt/pi"]))
         self.assertEqual(self.agent("")[0], "opencode")
+
+    def test_the_setup_files_are_the_team_file_role_files_and_launcher_config(self):
+        # README "Runs and traces": what the setup version covers.
+        self.agent("", "agent: pi\n")
+        launcher = self.launch.Launcher(mock.Mock(team="t", repo=str(self.repo), branch="b1", task="do it"))
+        launcher.validate()
+        config = self.launch.herdr_grants.CONFIG_DIR
+        self.assertEqual(
+            launcher.setup_files,
+            [self.teams / "t.yaml", self.launch.AGENTS_DIR / "coder.md", self.settings,
+             config / "global.yaml", config / "repos.yaml"],
+        )
 
     def test_unknown_agent_fails(self):
         with self.assertRaises(self.launch.StepError):
