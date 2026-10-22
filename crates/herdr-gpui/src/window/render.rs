@@ -202,6 +202,9 @@ impl Render for HerdrWindow {
             .map(|(slot, _)| *slot);
         let terminal_gap = terminal_slot.map_or(sidebar_gap, slot_gap);
         let find_bar = self.render_find_bar(surface.as_deref(), terminal_gap, cx);
+        let pane_marks = surface.as_deref().map_or_else(Vec::new, |surface| {
+            self.render_pane_marks(&surface.panes, cell_height, window)
+        });
         let copy_badge = self.render_copy_mode_badge(surface.as_deref(), terminal_gap);
         let terminal = div()
             .id("terminal")
@@ -348,169 +351,181 @@ impl Render for HerdrWindow {
             // input and paints what changes without them. Both fill this box,
             // so every region shares the canvas's bounds.
             .child(
-                div().relative().size_full().children(regions).child(
-                    canvas(
-                        move |bounds, _, cx| {
-                            entity.update(cx, |this, _| {
-                                this.bounds = bounds;
-                                this.options = ConnectOptions {
-                                    surface_size: viewport(
-                                        bounds.size.width.to_f64() as f32,
-                                        bounds.size.height.to_f64() as f32,
-                                        cell_width,
-                                        cell_height,
+                div()
+                    .relative()
+                    .size_full()
+                    .children(regions)
+                    .child(
+                        canvas(
+                            move |bounds, _, cx| {
+                                entity.update(cx, |this, _| {
+                                    this.bounds = bounds;
+                                    this.options = ConnectOptions {
+                                        surface_size: viewport(
+                                            bounds.size.width.to_f64() as f32,
+                                            bounds.size.height.to_f64() as f32,
+                                            cell_width,
+                                            cell_height,
+                                        ),
+                                        cell_width_px: cell_width.round().max(1.) as u32,
+                                        cell_height_px: cell_height.round().max(1.) as u32,
+                                    };
+                                    this.resize();
+                                });
+                            },
+                            move |bounds, _, window, cx| {
+                                // Capture movement outside the terminal too, before any
+                                // element can stop propagation of a drag-away event.
+                                let entity = paint_entity.clone();
+                                window.on_mouse_event(
+                                    move |event: &MouseMoveEvent, phase, _, cx| {
+                                        if phase == DispatchPhase::Capture {
+                                            entity.update(cx, |this, cx| {
+                                                // Window-wide, so leaving the terminal
+                                                // drops the underline too.
+                                                this.hover_link(
+                                                    event.position,
+                                                    event.modifiers,
+                                                    cx,
+                                                );
+                                                if this.scrollbar_mouse_move(event, cx)
+                                                    || this.split_mouse_move(event, cx)
+                                                    || this.terminal_mouse_move(event, cx)
+                                                {
+                                                    cx.stop_propagation();
+                                                    return;
+                                                }
+                                                if this.pressed_terminal_link.as_ref().is_some_and(
+                                                    |PressedLink { position, .. }| {
+                                                        (event.position.x - position.x).abs()
+                                                            > px(4.)
+                                                            || (event.position.y - position.y).abs()
+                                                                > px(4.)
+                                                    },
+                                                ) {
+                                                    this.pressed_terminal_link = None;
+                                                }
+                                                // A drag that leaves the terminal keeps
+                                                // selecting, and hover work elsewhere stays
+                                                // out of the gesture.
+                                                if this.extend_selection(event.position, cx) {
+                                                    cx.stop_propagation();
+                                                }
+                                            });
+                                        }
+                                    },
+                                );
+                                let released = paint_entity.clone();
+                                window.on_mouse_event(move |event: &MouseUpEvent, phase, _, cx| {
+                                    if phase == DispatchPhase::Capture {
+                                        released.update(cx, |this, cx| {
+                                            // Global: the overlay occludes the opener, and release
+                                            // may also precede the overlay's first frame.
+                                            if matches!(
+                                                event.button,
+                                                MouseButton::Left | MouseButton::Right
+                                            ) {
+                                                this.menu.opening_right_click = false;
+                                            }
+                                            if this.scrollbar_mouse_up(event, cx)
+                                                || this.split_mouse_up(event, cx)
+                                                || this.terminal_mouse_up(event, cx)
+                                                || (event.button == MouseButton::Left
+                                                    && !cx.has_active_drag()
+                                                    && this.release_selection(cx))
+                                            {
+                                                cx.stop_propagation();
+                                            }
+                                        });
+                                    }
+                                });
+                                window.handle_input(
+                                    &focus,
+                                    crate::input::TerminalInputHandler::new(
+                                        bounds,
+                                        paint_entity.clone(),
+                                        menu_open,
                                     ),
-                                    cell_width_px: cell_width.round().max(1.) as u32,
-                                    cell_height_px: cell_height.round().max(1.) as u32,
-                                };
-                                this.resize();
-                            });
-                        },
-                        move |bounds, _, window, cx| {
-                            // Capture movement outside the terminal too, before any
-                            // element can stop propagation of a drag-away event.
-                            let entity = paint_entity.clone();
-                            window.on_mouse_event(move |event: &MouseMoveEvent, phase, _, cx| {
-                                if phase == DispatchPhase::Capture {
-                                    entity.update(cx, |this, cx| {
-                                        // Window-wide, so leaving the terminal
-                                        // drops the underline too.
-                                        this.hover_link(event.position, event.modifiers, cx);
-                                        if this.scrollbar_mouse_move(event, cx)
-                                            || this.split_mouse_move(event, cx)
-                                            || this.terminal_mouse_move(event, cx)
-                                        {
-                                            cx.stop_propagation();
-                                            return;
-                                        }
-                                        if this.pressed_terminal_link.as_ref().is_some_and(
-                                            |PressedLink { position, .. }| {
-                                                (event.position.x - position.x).abs() > px(4.)
-                                                    || (event.position.y - position.y).abs()
-                                                        > px(4.)
-                                            },
-                                        ) {
-                                            this.pressed_terminal_link = None;
-                                        }
-                                        // A drag that leaves the terminal keeps
-                                        // selecting, and hover work elsewhere stays
-                                        // out of the gesture.
-                                        if this.extend_selection(event.position, cx) {
-                                            cx.stop_propagation();
-                                        }
-                                    });
-                                }
-                            });
-                            let released = paint_entity.clone();
-                            window.on_mouse_event(move |event: &MouseUpEvent, phase, _, cx| {
-                                if phase == DispatchPhase::Capture {
-                                    released.update(cx, |this, cx| {
-                                        // Global: the overlay occludes the opener, and release
-                                        // may also precede the overlay's first frame.
-                                        if matches!(
-                                            event.button,
-                                            MouseButton::Left | MouseButton::Right
-                                        ) {
-                                            this.menu.opening_right_click = false;
-                                        }
-                                        if this.scrollbar_mouse_up(event, cx)
-                                            || this.split_mouse_up(event, cx)
-                                            || this.terminal_mouse_up(event, cx)
-                                            || (event.button == MouseButton::Left
-                                                && !cx.has_active_drag()
-                                                && this.release_selection(cx))
-                                        {
-                                            cx.stop_propagation();
-                                        }
-                                    });
-                                }
-                            });
-                            window.handle_input(
-                                &focus,
-                                crate::input::TerminalInputHandler::new(
-                                    bounds,
-                                    paint_entity.clone(),
-                                    menu_open,
-                                ),
-                                cx,
-                            );
-                            if let Some(surface) = &surface {
-                                if whole {
-                                    painter.borrow_mut().paint_frame(
+                                    cx,
+                                );
+                                if let Some(surface) = &surface {
+                                    if whole {
+                                        painter.borrow_mut().paint_frame(
+                                            &surface.frame,
+                                            bounds.origin,
+                                            Some(bounds.size),
+                                            cell_width,
+                                            &font,
+                                            &highlights,
+                                            &surface.panes,
+                                            None,
+                                            images.as_deref().map(|images| PlacedImages {
+                                                placements: &surface.graphics.placements,
+                                                images,
+                                                target: ImageTarget::Main,
+                                            }),
+                                            window,
+                                            cx,
+                                        );
+                                    } else {
+                                        // Regions place no images, so nothing
+                                        // else releases the ones that went away.
+                                        painter.borrow_mut().release_idle_images(window);
+                                    }
+                                    painter.borrow().paint_link(
                                         &surface.frame,
                                         bounds.origin,
-                                        Some(bounds.size),
                                         cell_width,
-                                        &font,
-                                        &highlights,
-                                        &surface.panes,
-                                        None,
-                                        images.as_deref().map(|images| PlacedImages {
-                                            placements: &surface.graphics.placements,
-                                            images,
-                                            target: ImageTarget::Main,
-                                        }),
+                                        &link_rows,
                                         window,
-                                        cx,
                                     );
-                                } else {
-                                    // Regions place no images, so nothing
-                                    // else releases the ones that went away.
-                                    painter.borrow_mut().release_idle_images(window);
+                                    if let Some(popup) = &surface.popup {
+                                        let offset = popup_origin(
+                                            &surface.frame,
+                                            &popup.frame,
+                                            cell_width,
+                                            cell_height,
+                                        );
+                                        painter.borrow_mut().paint_frame(
+                                            &popup.frame,
+                                            bounds.origin + offset,
+                                            None,
+                                            cell_width,
+                                            &font,
+                                            &popup_highlights,
+                                            &[],
+                                            None,
+                                            images.as_deref().map(|images| PlacedImages {
+                                                placements: &surface.graphics.placements,
+                                                images,
+                                                target: ImageTarget::Popup(&popup.terminal_id),
+                                            }),
+                                            window,
+                                            cx,
+                                        );
+                                    }
                                 }
-                                painter.borrow().paint_link(
-                                    &surface.frame,
-                                    bounds.origin,
-                                    cell_width,
-                                    &link_rows,
-                                    window,
-                                );
-                                if let Some(popup) = &surface.popup {
-                                    let offset = popup_origin(
-                                        &surface.frame,
-                                        &popup.frame,
-                                        cell_width,
-                                        cell_height,
-                                    );
-                                    painter.borrow_mut().paint_frame(
-                                        &popup.frame,
-                                        bounds.origin + offset,
-                                        None,
-                                        cell_width,
+                                if let Some((marked, live)) = &marked {
+                                    let live = live.as_deref();
+                                    painter.borrow().paint_composition(
+                                        marked,
+                                        input_cursor_bounds(
+                                            live,
+                                            bounds.origin,
+                                            cell_width,
+                                            cell_height,
+                                        )
+                                        .origin,
+                                        input_area(live, bounds, cell_width, cell_height),
                                         &font,
-                                        &popup_highlights,
-                                        &[],
-                                        None,
-                                        images.as_deref().map(|images| PlacedImages {
-                                            placements: &surface.graphics.placements,
-                                            images,
-                                            target: ImageTarget::Popup(&popup.terminal_id),
-                                        }),
                                         window,
-                                        cx,
                                     );
                                 }
-                            }
-                            if let Some((marked, live)) = &marked {
-                                let live = live.as_deref();
-                                painter.borrow().paint_composition(
-                                    marked,
-                                    input_cursor_bounds(
-                                        live,
-                                        bounds.origin,
-                                        cell_width,
-                                        cell_height,
-                                    )
-                                    .origin,
-                                    input_area(live, bounds, cell_width, cell_height),
-                                    &font,
-                                    window,
-                                );
-                            }
-                        },
+                            },
+                        )
+                        .size_full(),
                     )
-                    .size_full(),
-                ),
+                    .children(pane_marks),
             )
             .when_some(find_bar, |terminal, bar| terminal.child(bar))
             .when_some(copy_badge, |terminal, badge| terminal.child(badge))
