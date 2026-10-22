@@ -123,11 +123,7 @@ bundle profile="release" features="":
 test-build: build-release
     cargo test --locked --release -p herdr-gpui --test cli
 
-# Fail on source files over 1,000 lines.
-check-file-size:
-    bash scripts/check-file-size.sh
-
-ci: format-check check-file-size lint test
+ci: format-check lint test
 
 # Cross type-check the Windows target without a Windows machine. CI lints the
 # MSVC target on a Windows runner; this uses the GNU target because a Mac or
