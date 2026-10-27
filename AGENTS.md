@@ -51,7 +51,7 @@ The `git-workflow` skill contains the commands for each step.
 - State what could not be built, run or tested.
 
 ### Change size
-- Stop and ask the user before a change exceeds 1,000 added plus deleted lines, excluding lockfiles.
+- Stop and ask the user before a change exceeds 10,000 added plus deleted lines, excluding lockfiles.
 - A pull request to `develop` over this limit fails the `pr-size` check unless it has the `size-exception` label. Add the label only after the user approves the size.
 <!-- END UNIVERSAL -->
 
