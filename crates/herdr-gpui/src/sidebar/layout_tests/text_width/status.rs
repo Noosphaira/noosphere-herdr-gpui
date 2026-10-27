@@ -37,5 +37,13 @@ pub(super) fn check_status_bar(
     view.read_with(cx, |view, _| {
         assert_eq!(view.version_label(), format!("GUI {}", crate::GUI_VERSION));
     });
+    // The version opens About, which names the same version.
+    let version = cx
+        .debug_bounds("status-version")
+        .context("status version bounds")?;
+    cx.simulate_click(version.center(), Default::default());
+    cx.update(|_, cx| assert!(view.read(cx).menu.page == Some(crate::menu::Page::About)));
+    cx.simulate_keystrokes("escape");
+    cx.update(|_, cx| assert!(view.read(cx).menu.page.is_none()));
     Ok(())
 }

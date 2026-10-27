@@ -1,12 +1,11 @@
-//! Process bootstrap and window opening. CLI parsing and the updater helper
-//! run before GPUI starts, so an invalid option or `--build-info` exits without
+//! Process bootstrap and window opening. CLI parsing runs before GPUI starts, so an invalid option or `--build-info` exits without
 //! ever creating a window.
 
 use crate::{
     GUI_VERSION, HerdrWindow, Hide, HideOthers, Quit, ShowAll, ShowLogs, WINDOW_TITLE, app_icon,
     bind_keys, cli,
     config::{Config, Theme},
-    diagnostics, icons, log_window, menus, titlebar, updater,
+    diagnostics, icons, log_window, menus, titlebar,
 };
 #[cfg(feature = "integration-test")]
 use crate::{performance, smoke};
@@ -84,7 +83,6 @@ impl StartupAppearance {
 /// of that daemon: its own connection, surface lease, and workspace focus.
 pub(crate) fn open_window(
     target: ConnectTarget,
-    updater: updater::Updater,
     cx: &mut App,
     #[cfg(feature = "integration-test")] fixture: bool,
 ) -> Result<WindowHandle<HerdrWindow>> {
@@ -110,14 +108,13 @@ pub(crate) fn open_window(
         },
         |window, cx| {
             cx.new(|cx| {
-                let mut view = HerdrWindow::new(
+                let view = HerdrWindow::new(
                     target,
                     window,
                     cx,
                     #[cfg(feature = "integration-test")]
                     fixture,
                 );
-                view.updater = updater;
                 crate::window_state::WindowState::observe(window, cx);
                 view
             })
@@ -130,7 +127,6 @@ pub(crate) fn open_additional_window(target: ConnectTarget, cx: &mut App) {
     cx.defer(move |cx| {
         let opened = open_window(
             target,
-            updater::Updater::secondary(),
             cx,
             #[cfg(feature = "integration-test")]
             false,
@@ -150,9 +146,6 @@ pub(crate) fn open_additional_window(target: ConnectTarget, cx: &mut App) {
 pub(crate) fn run() -> std::process::ExitCode {
     use cli::{LaunchMode, LaunchOptions};
     let args: Vec<_> = std::env::args_os().skip(1).collect();
-    if let Some(exit) = updater::run_helper(&args) {
-        return exit;
-    }
     let LaunchOptions { target, mode } = match LaunchOptions::parse(args) {
         Ok(options) => options,
         Err(error) => {
@@ -165,7 +158,7 @@ pub(crate) fn run() -> std::process::ExitCode {
     if let LaunchMode::Browser(command) = mode {
         return crate::control::run(command);
     }
-    // A separate app of its own: no daemon, control socket, stores, or updater.
+    // A separate app of its own: no daemon, control socket, or stores.
     #[cfg(feature = "mockup")]
     if let LaunchMode::Mockup(options) = mode {
         return crate::mockup::run(options);
@@ -294,15 +287,8 @@ pub(crate) fn run() -> std::process::ExitCode {
                 }
             })
             .detach();
-            // Native test modes and CLI invocations never start an updater worker.
-            let updater = if mode == LaunchMode::Normal {
-                updater::Updater::start()
-            } else {
-                updater::Updater::default()
-            };
             let opened = open_window(
                 target.clone(),
-                updater,
                 cx,
                 #[cfg(feature = "integration-test")]
                 {

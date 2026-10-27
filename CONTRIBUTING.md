@@ -9,9 +9,9 @@ human and agent contributors alike.
 ## Before You Start
 
 - **macOS and experimental Linux builds.** GPUI uses Metal on macOS and
-  Vulkan with X11/Wayland on Linux. CI/release builds cover Linux x86_64 and
-  ARM64; native Linux desktop verification is still pending. No Windows build
-  currently exists.
+  Vulkan with X11/Wayland on Linux, on x86_64 and ARM64; native Linux desktop
+  verification is still pending. The Windows build is experimental and only
+  cross-checked with `just lint-windows`.
 - **You need Herdr installed.** This repository is a client of the
   daemon from [herdrdev/herdr](https://github.com/herdrdev/herdr). Normal local
   launches may start it if absent; explicit sockets remain attach-only. The GUI
@@ -49,19 +49,13 @@ just format
 just ci
 ```
 
-`just ci` is exactly what CI runs: `cargo fmt --all -- --check`, a
-`-D warnings` clippy pass over all targets and features, and the test suite
-under both default and all features. CI additionally builds release binaries
-for Apple Silicon, Intel macOS, and native Ubuntu 24.04 x86_64/ARM64, exercising
-their release CLI without a desktop. Run `just test-build` for linking or
-packaging changes and `just release-check` for archive/release changes. The latter
-runs the release packaging/security tests and workflow audits; see
-[release tooling](scripts/release/README.md) for prerequisites. Owner-authored
-internal PRs run audit/test jobs; optimized release builds run only on `main`.
-Outside-contributor and Dependabot PR jobs are skipped, not considered validated;
-see the [CI policy](README.md#continuous-integration).
+`just ci` runs `cargo fmt --all -- --check`, a `-D warnings` clippy pass over
+all targets and features, and the test suite under both default and all
+features. Run `just test-build` for linking or packaging changes: it builds the
+optimized executable and exercises its CLI without a desktop. The repository
+has no hosted CI, so these local runs are the validation.
 
-Some tests are opt-in because they need resources CI does not have:
+Some tests are opt-in because they need external resources:
 
 ```sh
 just test-live /absolute/path/to/herdr   # needs an explicit daemon binary
@@ -83,10 +77,6 @@ parent Wayland socket without exposing its HOME or runtime directory to daemons.
 - Follow the branch, commit and pull request rules in [AGENTS.md](AGENTS.md).
   Commit subjects are in the imperative mood, at most 72 characters, followed
   by a blank line and a body that explains what changed and why.
-- Subjects are published: the release notes are generated from them with
-  git-cliff. Write the subject for someone reading a release page, and keep
-  rationale in the body; only the first line is published. Preview the result
-  with `just changelog-unreleased`.
 - Run `just hooks` once per clone. It sets `core.hooksPath` to `.githooks`,
   whose hooks check commit messages and run before commits and pushes.
 - Branch from `develop` and open pull requests against `develop`. Review your

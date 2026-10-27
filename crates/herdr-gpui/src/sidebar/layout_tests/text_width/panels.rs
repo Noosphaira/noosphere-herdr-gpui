@@ -1,5 +1,5 @@
 //! Shortcut search, Preferences, GitHub, theme, palette, close, keybinds,
-//! install, and app update panel checks.
+//! and install panel checks.
 use super::*;
 
 pub(super) fn check_shortcut_search(view: &Entity<HerdrWindow>, cx: &mut gpui::VisualTestContext) {
@@ -423,10 +423,7 @@ pub(super) fn check_keybinds_panel(view: &Entity<HerdrWindow>, cx: &mut gpui::Vi
     cx.update(|_, cx| assert!(view.read(cx).menu.page.is_none()));
 }
 
-pub(super) fn check_install_modal(
-    view: &Entity<HerdrWindow>,
-    cx: &mut gpui::VisualTestContext,
-) -> Option<Arc<ClientShellSnapshot>> {
+pub(super) fn check_install_modal(view: &Entity<HerdrWindow>, cx: &mut gpui::VisualTestContext) {
     let before_install = cx.update(|_, cx| view.read(cx).live.snapshot.clone());
     cx.update(|window, cx| {
         view.update(cx, |view, cx| view.show_install_modal(window, cx));
@@ -442,138 +439,4 @@ pub(super) fn check_install_modal(
     assert!(cx.debug_bounds("menu-dismiss").is_some());
     cx.simulate_keystrokes("escape");
     cx.update(|_, cx| assert!(view.read(cx).menu.page.is_none()));
-    before_install
-}
-
-pub(super) fn check_app_update(
-    view: &Entity<HerdrWindow>,
-    before_install: &Option<Arc<ClientShellSnapshot>>,
-    cx: &mut gpui::VisualTestContext,
-) -> Result<()> {
-    // Fixtures have no updater worker, and unavailable updates use the shared panel.
-    let updater_before = cx.update(|_, cx| view.read(cx).updater.state().clone());
-    assert!(matches!(updater_before, crate::updater::State::Disabled(_)));
-    cx.update(|window, cx| window.dispatch_action(Box::new(crate::CheckForUpdates), cx));
-    assert!(cx.pending_prompt().is_none());
-    cx.update(|window, cx| {
-        full_draw(window, cx).clear(cx);
-        assert!(view.read(cx).menu.page == Some(crate::menu::Page::AppUpdate));
-        assert_eq!(view.read(cx).live.snapshot, *before_install);
-    });
-    assert!(cx.debug_bounds("app-update-action").is_none());
-    let releases = cx
-        .debug_bounds("app-update-releases")
-        .context("update releases bounds")?;
-    cx.simulate_click(releases.center(), Default::default());
-    assert_eq!(
-        cx.opened_url().as_deref(),
-        Some("https://github.com/penso/herdr-gpui/releases")
-    );
-    let close = cx
-        .debug_bounds("app-update-close")
-        .context("update close bounds")?;
-    cx.simulate_click(close.center(), Default::default());
-    cx.update(|window, cx| {
-        let view = view.read(cx);
-        assert!(view.menu.page.is_none());
-        assert!(view.focus.is_focused(window));
-        assert_eq!(view.updater.state(), &updater_before);
-    });
-    for (width, height) in [(320., 360.), (320., 600.), (480., 600.), (800., 600.)] {
-        cx.simulate_resize(size(px(width), px(height)));
-        cx.update(|window, cx| window.dispatch_action(Box::new(crate::ShowUpdatePreview), cx));
-        for ready in [false, true] {
-            cx.update(|window, cx| {
-                full_draw(window, cx).clear(cx);
-                let view = view.read(cx);
-                assert_eq!(view.updater.state(), &updater_before);
-                assert_eq!(view.live.snapshot, *before_install);
-                assert_eq!(
-                    view.update_preview,
-                    Some(if ready {
-                        crate::updater::State::Ready {
-                            version: "9999.0.0".into(),
-                        }
-                    } else {
-                        crate::updater::State::Available {
-                            version: "9999.0.0".into(),
-                        }
-                    })
-                );
-            });
-            let panel = cx
-                .debug_bounds("app-update-panel")
-                .context("update panel bounds")?;
-            let action = cx
-                .debug_bounds("app-update-action")
-                .context("update action bounds")?;
-            let header = cx
-                .debug_bounds("app-update-header")
-                .context("update header bounds")?;
-            let close = cx
-                .debug_bounds("app-update-close")
-                .context("update close bounds")?;
-            assert_eq!(close.right(), header.right() - px(16.));
-            assert!(close.left() > header.center().x);
-            assert!(close.top() >= header.top() && close.bottom() <= header.bottom());
-            assert!(header.bottom() < action.top());
-            let body = cx
-                .debug_bounds("app-update-body")
-                .context("update body bounds")?;
-            let footer = cx
-                .debug_bounds("app-update-footer")
-                .context("update footer bounds")?;
-            let current = cx
-                .debug_bounds("app-update-current-version")
-                .context("current version bounds")?;
-            let latest = cx
-                .debug_bounds("app-update-latest-version")
-                .context("latest version bounds")?;
-            assert_eq!(current.left(), latest.left());
-            assert_eq!(current.right(), latest.right());
-            assert!(current.bottom() < latest.top());
-            assert_eq!(header.left(), panel.left());
-            assert_eq!(header.right(), panel.right());
-            assert!(body.top() >= header.bottom());
-            assert!((footer.top() - body.bottom()).abs() <= px(1.));
-            assert!(panel.top() >= px(0.) && panel.bottom() <= px(height));
-            assert!(action.top() >= footer.top() && action.bottom() <= footer.bottom());
-            assert!(panel.left() >= px(0.) && panel.right() <= px(width));
-            assert!(action.left() >= panel.left() && action.right() <= panel.right());
-            assert!(action.top() >= panel.top() && action.bottom() <= panel.bottom());
-            cx.simulate_click(action.center(), Default::default());
-        }
-        cx.update(|_, cx| {
-            let view = view.read(cx);
-            assert!(view.menu.page.is_none());
-            assert!(view.update_preview.is_none());
-            assert_eq!(view.updater.state(), &updater_before);
-        });
-        assert!(cx.pending_prompt().is_none());
-    }
-    // The same panel is reachable without native menus, including on Linux.
-    cx.update(|window, cx| {
-        view.update(cx, |view, cx| view.open_menu(window, cx));
-        full_draw(window, cx).clear(cx);
-    });
-    let updates = cx
-        .debug_bounds("menu-app updates")
-        .context("app updates menu bounds")?;
-    assert!(cx.debug_bounds("menu-preview app update").is_some());
-    cx.simulate_click(updates.center(), Default::default());
-    cx.update(|_, cx| {
-        assert!(view.read(cx).menu.page == Some(crate::menu::Page::AppUpdate));
-        assert!(view.read(cx).update_preview.is_none());
-    });
-    cx.simulate_keystrokes("escape");
-    cx.update(|window, cx| window.dispatch_action(Box::new(crate::ShowUpdatePreview), cx));
-    cx.simulate_keystrokes("escape");
-    cx.update(|window, cx| {
-        let view = view.read(cx);
-        assert!(view.menu.page.is_none());
-        assert!(view.update_preview.is_none());
-        assert!(view.focus.is_focused(window));
-        assert_eq!(view.updater.state(), &updater_before);
-    });
-    Ok(())
 }

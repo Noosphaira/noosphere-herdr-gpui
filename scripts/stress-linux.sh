@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # Repeat the Linux test suite under CPU pressure, where scheduling races that a
-# fast workstation hides actually reproduce. A half-core container reproduced the
-# updater's lost-output race at 3 runs in 30 while the same tests passed 14 times
-# in a row unthrottled, and on every CI runner but one.
+# fast workstation hides actually reproduce. A half-core container reproduced a
+# lost-output race at 3 runs in 30 while the same tests passed 14 times in a row
+# unthrottled.
 #
 # Reads the working tree, never writes to it. Toolchain and build outputs are
 # cached outside the repository so repeated runs stay cheap.
@@ -34,7 +34,7 @@ export CARGO_HOME=/cache/cargo RUSTUP_HOME=/cache/rustup CARGO_TARGET_DIR=/cache
 # System packages live in the container and are gone every run; the toolchain
 # lives in the cache and survives. Installing both on the same condition left
 # later runs without a linker, so they are decided separately.
-# What the workspace links against comes from the script CI runs, so this
+# What the workspace links against comes from install-linux-deps.sh, so this
 # container cannot drift from it: a hand-kept copy here went stale the moment
 # the notification sounds added ALSA, and every run failed to build.
 bash /tree/scripts/install-linux-deps.sh >/dev/null

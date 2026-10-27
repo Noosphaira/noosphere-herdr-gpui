@@ -254,7 +254,7 @@ Nice to have: give each pane its role as a title, if the herdr CLI supports rena
 
 ### 6.1 Base
 
-- Fork `penso/herdr-gpui`, licensed Apache-2.0. It is an unaffiliated, experimental project, so keep every change in its own module and keep the diff small enough to rebase. Offering the dialog upstream as a pull request is optional.
+- The fork `Noosphaira/noosphere-herdr-gpui`, based on herdr-gpui by Fabien Penso (Apache-2.0). The fork is separate from that project and does not track or rebase on it. Keep every change in its own module.
 - Build on the dev PC following the repo's Linux instructions. Runtime needs a Vulkan driver, the ALSA shared library with a configured default audio device, and glibc 2.39 or newer.
 - On Linux, herdr-gpui maps its Cmd shortcuts to Super, which can clash with desktop shortcuts. Omarchy's Hyprland bindings are Super-based (**ASSUMPTION**). Rebind the clashing commands in `config-gpui.local.toml` under `[keybindings]`.
 
@@ -340,7 +340,7 @@ Finish each phase and pass its acceptance checks before starting the next.
 - herdr agent skill and CLI patterns: https://github.com/herdrdev/herdr/blob/master/skills/herdr/SKILL.md
 - herdr agent automation docs, covering `pane split`, `agent start`, `agent prompt` and pane-ID targeting: https://github.com/herdrdev/herdr/blob/master/docs/versions/0.8.0/website/src/content/docs/agent-automation.mdx
 - Root-pane field from `worktree create`, as read by a third-party client: https://github.com/brogrammerMW/herdr-voice/pull/71
-- herdr-gpui: https://github.com/penso/herdr-gpui and https://github.com/penso/herdr-gpui/blob/main/crates/herdr-gpui/README.md
+- herdr-gpui fork: https://github.com/Noosphaira/noosphere-herdr-gpui and its `crates/herdr-gpui/README.md`
 - OpenCode CLI flags: https://opencode.ai/docs/cli/
 - OpenCode agents: https://opencode.ai/docs/agents/
 - OpenCode bash tool bypassing `external_directory`: https://github.com/anomalyco/opencode/issues/42979

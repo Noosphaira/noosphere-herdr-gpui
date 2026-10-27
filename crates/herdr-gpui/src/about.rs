@@ -5,11 +5,12 @@ use gpui::{prelude::*, *};
 use std::sync::{Arc, LazyLock};
 
 pub(super) const WEBSITE: &str = "https://herdr.dev/";
-pub(super) const REPOSITORY: &str = "https://github.com/penso/herdr-gpui";
+pub(super) const REPOSITORY: &str = "https://github.com/Noosphaira/noosphere-herdr-gpui";
 const COPYRIGHT_YEAR: &str = "© 2026";
 const AUTHOR: &str = "Fabien Penso";
 const AUTHOR_URL: &str = "https://pen.so";
-const TWITTER_URL: &str = "https://x.com/fabienpenso";
+// This app is a separate fork; the copyright below stays the original author's.
+const ORIGIN: &str = "Based on herdr-gpui by Fabien Penso.";
 const LICENSE: &str = "· Apache-2.0";
 const SUMMARY: &str = "Native client for an existing local Herdr daemon.";
 const UNAFFILIATED: &str = "An independent project, not affiliated with or endorsed by herdr.dev.";
@@ -78,6 +79,13 @@ impl HerdrWindow {
                     .text_color(muted)
                     .child(UNAFFILIATED),
             )
+            .child(
+                div()
+                    .debug_selector(|| "about-origin".into())
+                    .text_size(px(font.size * 0.85))
+                    .text_color(muted)
+                    .child(ORIGIN),
+            )
             .children(self.render_about_build(theme))
             .child(
                 div()
@@ -99,16 +107,6 @@ impl HerdrWindow {
                     .text_color(muted)
                     .child(COPYRIGHT_YEAR)
                     .child(self.about_link("about-author", AUTHOR, AUTHOR_URL))
-                    .child(
-                        self.about_link(
-                            "about-twitter",
-                            svg()
-                                .path("icons/x.svg")
-                                .size(px(font.size * 0.85))
-                                .text_color(crate::menu::accent(theme)),
-                            TWITTER_URL,
-                        ),
-                    )
                     .child(LICENSE),
             )
             .child(
@@ -234,22 +232,25 @@ mod tests {
             cx.update(|window, cx| view.update(cx, |view, cx| view.open_about(window, cx)));
             cx.simulate_resize(size(px(width), px(600.)));
             cx.update(|window, cx| window.draw(cx).clear(cx));
+            assert!(cx.debug_bounds("about-twitter").is_none());
             let about = cx.debug_bounds("about").unwrap();
             let icon = cx.debug_bounds("about-icon").unwrap();
             let name = cx.debug_bounds("about-name").unwrap();
             let version = cx.debug_bounds("about-version").unwrap();
             let disclaimer = cx.debug_bounds("about-unaffiliated").unwrap();
+            let origin = cx.debug_bounds("about-origin").unwrap();
             let copyright = cx.debug_bounds("about-copyright").unwrap();
             let close = cx.debug_bounds("about-close").unwrap();
             assert_eq!(icon.size, size(px(96.), px(96.)));
-            for row in [icon, name, version, disclaimer, copyright, close] {
+            for row in [icon, name, version, disclaimer, origin, copyright, close] {
                 assert!(row.top() >= about.top() && row.bottom() <= about.bottom());
                 assert!(row.left() >= about.left() && row.right() <= about.right());
             }
             assert!(icon.bottom() <= name.top());
             assert!(name.bottom() <= version.top());
             assert!(version.bottom() <= disclaimer.top());
-            assert!(disclaimer.bottom() <= copyright.top());
+            assert!(disclaimer.bottom() <= origin.top());
+            assert!(origin.bottom() <= copyright.top());
             assert!(copyright.bottom() <= close.top());
             assert!(about.right() <= px(width));
             assert_eq!(
@@ -259,9 +260,11 @@ mod tests {
 
             for (selector, url) in [
                 ("about-website", WEBSITE.to_owned()),
-                ("about-repository", REPOSITORY.to_owned()),
+                (
+                    "about-repository",
+                    "https://github.com/Noosphaira/noosphere-herdr-gpui".to_owned(),
+                ),
                 ("about-author", "https://pen.so".to_owned()),
-                ("about-twitter", "https://x.com/fabienpenso".to_owned()),
             ] {
                 let link = cx.debug_bounds(selector).unwrap();
                 cx.simulate_click(link.center(), Modifiers::default());

@@ -53,8 +53,6 @@ mod sticky_hosts;
 #[cfg(test)]
 mod text_width;
 #[cfg(test)]
-mod update_panel;
-#[cfg(test)]
 mod workspace_menu;
 #[cfg(test)]
 mod worktree_rows;
@@ -407,8 +405,6 @@ pub(crate) fn fixture_window(window: &mut Window, cx: &mut Context<HerdrWindow>)
     HerdrWindow {
         sound: Default::default(),
         bell: Default::default(),
-        updater: crate::updater::Updater::default(),
-        update_preview: None,
         daemon_text: Default::default(),
         removal: None,
         worktree_script: None,

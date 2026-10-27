@@ -56,7 +56,6 @@ fn toast_preview_actions_use_normal_state_without_a_connection(cx: &mut TestAppC
         window.draw(cx).clear(cx);
     });
     let snapshot = view.read_with(cx, |view, _| view.live.snapshot.clone());
-    let updater = view.read_with(cx, |view, _| view.updater.state().clone());
     for (index, kind) in [
         SemanticNotificationKind::NeedsAttention,
         SemanticNotificationKind::Finished,
@@ -83,7 +82,6 @@ fn toast_preview_actions_use_normal_state_without_a_connection(cx: &mut TestAppC
             assert!(view.endpoints[0].toasts.entries.is_empty());
             assert_eq!(view.selected_endpoint, 1);
             assert_eq!(view.live.snapshot, snapshot);
-            assert_eq!(view.updater.state(), &updater);
             assert!(view.focus.is_focused(window));
         });
         assert!(

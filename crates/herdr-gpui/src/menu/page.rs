@@ -28,7 +28,6 @@ pub(crate) enum Page {
     Palette,
     ConfirmClose,
     Update,
-    AppUpdate,
     Install,
     /// A daemon refused the handshake until one side is updated.
     VersionMismatch,

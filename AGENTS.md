@@ -61,10 +61,11 @@ Herdr GPUI is a native Rust/GPUI client for macOS, Linux and Windows. It connect
 Read this file with `README.md`, the relevant crate documentation and the code before making changes.
 
 #### Fork
-- This checkout is the user's fork, `Noosphaira/noosphere-herdr-gpui`. All work happens there: branches, pushes, pull requests and every `gh` command.
-- Ignore the upstream `penso/herdr-gpui` unless the user asks for it in the current request. No pull requests, issues, comments or pushes there. No fetching, syncing, merging or rebasing from it.
-- Pass `--repo Noosphaira/noosphere-herdr-gpui` to `gh`. In a fork, `gh` may otherwise default to the parent.
-- The workflows in `.github/workflows/` run only in upstream. They do not run in this fork.
+- This repository, `Noosphaira/noosphere-herdr-gpui`, began as a fork of `penso/herdr-gpui` and is now a separate project. All work happens here: branches, pushes, pull requests and every `gh` command.
+- Never use `penso/herdr-gpui`: no pull requests, issues, comments or pushes there, and no fetching, syncing, merging or rebasing from it.
+- Pass `--repo Noosphaira/noosphere-herdr-gpui` to `gh`. `gh` may otherwise default to the original parent.
+- The repository has no CI workflows, release pipeline or in-app updater. The local `just` recipes are the validation.
+- Keep `LICENSE`, `NOTICE` and the attribution files (`crates/herdr-protocol/NOTICE.md`, `crates/herdr-gpui/GITHUB-NOTICE.md`, `crates/herdr-gpui/SOUND-NOTICE.md`). Apache-2.0 requires them.
 
 #### Priorities
 - Keep changes small, explicit and focused on the root cause.
@@ -103,7 +104,6 @@ just ci
 - `just ci` runs `format-check`, `lint` (clippy, all targets and features, `-D warnings`) and `test` (default and all features).
 - For linking, startup or packaging changes, also run `just test-build`. It builds the release executable and exercises its CLI without a desktop.
 - For a change that touches a `cfg` gate, also run `just lint-linux` and `just lint-windows`. A `cfg` gate is only proven on the platform it names.
-- For changes under `scripts/release`, run `just release-check`, or at least `python3 -m unittest discover -s scripts/release/tests`.
 - Documentation-only changes need command, path and link review and `git diff --check`.
 
 ### Run locally
@@ -114,12 +114,11 @@ just ci
 
 ### Repository layout
 - `crates/`: the workspace crates (see Overview > Architecture).
-- `assets/`: icons and platform bundle files.
-- `scripts/`: Linux dependencies, lint containers, icons, updater and release tooling. `scripts/release/` holds the release scripts and their Python tests.
+- `assets/`: icons, platform bundle files and the Linux desktop entry.
+- `scripts/`: Linux dependencies, lint containers, icon generation and `build-icon.py`, which picks the bundle icon from a binary's build identity.
 - `docs/`: user and platform documentation.
 - `.githooks/`: the git hooks set by `core.hooksPath`.
-- `.claude/skills/`: agent skills (`git-workflow`, `pr-review-loop`, `release`, `gpui-mockup`).
-- `cliff.toml`: git-cliff configuration for release notes.
+- `.claude/skills/`: agent skills (`git-workflow`, `pr-review-loop`, `gpui-mockup`).
 
 ### Conventions
 
@@ -176,17 +175,13 @@ just ci
 - Do not introduce Tokio or another runtime to wrap the existing blocking socket worker.
 - Avoid unrelated lockfile upgrades. Use `--locked` for reproducible verification.
 
-#### Commits and release notes
-- Release notes come from git history. `scripts/release/generate-changelog.sh` runs `git-cliff` with `cliff.toml` and writes `CHANGELOG.md` and `RELEASE_NOTES.md`. The release workflow passes `RELEASE_NOTES.md` to `gh release create --notes-file`. `CHANGELOG.md` is not tracked in git.
-- The first line of each commit subject becomes one entry, with its first letter capitalized. Merge commits are skipped. Write the subject for a user reading a release page. Put the rationale in the body.
-- `cliff.toml` groups entries by conventional-commit prefix. Plain imperative subjects match none of those prefixes and fall into Changed.
-- Preview the unreleased entries with `just changelog-unreleased`. The `release` skill covers previewing a release.
+#### Commits
 - For nontrivial work, the commit body explains the problem, the chosen approach and important constraints.
 - Before committing, inspect status, diff and recent history. Stage only intended files and check for secrets. Do not bypass signing when it fails.
 - Do not amend, force-push, discard changes or clean up other worktrees without explicit authorization.
 
 #### Versioning
-- The fork's version is `version` under `[workspace.package]` in the root `Cargo.toml`, in semver. The app shows it as `GUI x.y.z` at the right of the status bar and in About, and logs it at startup and in log exports. The Herdr version beside it comes from the connected daemon's welcome. Never hardcode or guess it.
+- The app's version is `version` under `[workspace.package]` in the root `Cargo.toml`, in semver. The app shows it as `GUI x.y.z` at the right of the status bar and in About, and logs it at startup and in log exports. The Herdr version beside it comes from the connected daemon's welcome. Never hardcode or guess it.
 - Bump it in the pull request that makes the change, once per pull request, by the most significant kind of change:
   - A new feature or a breaking change: minor while below 1.0 (0.2.0 -> 0.3.0).
   - A bug fix, performance change, refactor or revert: patch (0.2.0 -> 0.2.1).
@@ -194,7 +189,7 @@ just ci
 - Bump from the version on `develop`, not from another open pull request. When another bump lands first, merge `origin/develop` and bump again from its version.
 - Commit `Cargo.toml` and `Cargo.lock` together. A plain `cargo build` updates the lockfile. Its diff touches only the three workspace crates' versions. Put the bump in the change's own commit, not a separate commit.
 - State the bump in the pull request summary, for example `Version: 0.2.0 -> 0.2.1`.
-- Leave `APP_VERSION` and `HERDR_RELEASE_VERSION` alone. They are upstream's calendar release identity, which the updater and release-only behavior key off. Setting `HERDR_RELEASE_VERSION` in a local build turns those on.
+- `HERDR_RELEASE_VERSION` is not a version. When set at build time it marks a signed release build (`RELEASE_BUILD`), which turns on macOS Keychain storage and the agent skill offer. No script in this repository sets it. Do not set it in a local build.
 
 #### Pull requests
 These rules add to the pull request template. They do not replace its sections.
@@ -205,7 +200,7 @@ These rules add to the pull request template. They do not replace its sections.
 - Finish with the outcome, the tests actually run, known limitations and deferred work. Never claim unrun checks passed.
 
 #### Verification details
-- The upstream `windows` CI job checks formatting, lints every target and feature, and runs workspace tests with default and all features, including headless UI and CLI tests. Optimized Windows builds and CLI tests run in the release workflow. Native GUI behavior on Windows is unproven. Keep the `cfg(unix)`/`cfg(windows)` split honest. Say plainly what a platform cannot do instead of stubbing behavior that appears to work.
+- Windows is only cross-checked with `just lint-windows`. Native GUI behavior on Windows is unproven. Keep the `cfg(unix)`/`cfg(windows)` split honest. Say plainly what a platform cannot do instead of stubbing behavior that appears to work.
 - A macOS run cannot see a Linux-only gate, and neither can the Windows cross-check. Run `just lint-linux`, `just lint-windows` and `just ci` for a change that touches a `cfg` gate.
 - Do not claim a code test run that did not happen.
 - Add deterministic tests for invariants: ordering, cancellation, fragmentation, revision fencing, error paths, geometry and cleanup. Prefer explicit coordination and bounded waits over timing guesses.

@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
-# Clippy for Linux from any host with Docker, in the same Ubuntu 24.04 the CI
-# runners use. A cfg gate that is wrong only on Linux is invisible from macOS,
-# and `just lint-windows` only covers Windows; this is the third corner.
+# Clippy for Linux from any host with Docker, in an Ubuntu 24.04 container. A
+# cfg gate that is wrong only on Linux is invisible from macOS, and
+# `just lint-windows` only covers Windows; this is the third corner.
 #
 # The container runs the host's architecture by default. Pass a platform, for
 # example linux/amd64 on Apple Silicon, to check the other one under emulation.
@@ -34,7 +34,7 @@ export DEBIAN_FRONTEND=noninteractive
 export PATH="/cache/cargo/bin:$PATH"
 export CARGO_HOME=/cache/cargo RUSTUP_HOME=/cache/rustup CARGO_TARGET_DIR=/cache/target
 
-# Reuse CI's dependency list rather than a second copy that can drift. It calls
+# Reuse the shared dependency list rather than a second copy that can drift. It calls
 # sudo, which a root container has no reason to install.
 printf '#!/bin/sh\nexec "$@"\n' > /usr/local/bin/sudo
 chmod +x /usr/local/bin/sudo

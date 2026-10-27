@@ -18,11 +18,7 @@ actions!(
         PlaySound,
         RingBellPreview,
         ShowHerdrNotDetected,
-        ShowLogs,
-        CheckForUpdates,
-        ShowUpdatePreview,
-        ShowUpdateDownloadPreview,
-        ShowUpdateHomebrewPreview
+        ShowLogs
     ]
 );
 

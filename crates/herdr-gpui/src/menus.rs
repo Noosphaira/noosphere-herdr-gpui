@@ -1,20 +1,18 @@
 //! The native menu bar. Every item dispatches the same `Command` the palette
 //! and the keymap use, so a command exists in one place only.
 
-use crate::{
-    CheckForUpdates, Quit, RunCommand, ShowLogs,
-    actions::{Copy, Cut, Paste, SelectAll, SetLayout},
-    config::{Layout, LayoutMode},
-    controls::Command,
-};
 #[cfg(target_os = "macos")]
 use crate::{Hide, HideOthers, Minimize, ShowAll};
 #[cfg(feature = "qa-menu")]
 use crate::{
-    PlaySound, ShowHerdrNotDetected, ShowUpdatePreview,
-    actions::{
-        RingBellPreview, ShowToastPreview, ShowUpdateDownloadPreview, ShowUpdateHomebrewPreview,
-    },
+    PlaySound, ShowHerdrNotDetected,
+    actions::{RingBellPreview, ShowToastPreview},
+};
+use crate::{
+    Quit, RunCommand, ShowLogs,
+    actions::{Copy, Cut, Paste, SelectAll, SetLayout},
+    config::{Layout, LayoutMode},
+    controls::Command,
 };
 use gpui::{App, Menu, MenuItem, OsAction};
 #[cfg(feature = "qa-menu")]
@@ -75,7 +73,6 @@ pub(crate) fn menus(layout: Layout) -> Vec<Menu> {
                         command: Command::Keybinds,
                     },
                 ),
-                MenuItem::action("Check for Updates...", CheckForUpdates),
                 // macOS reserves Hide for every app; without these items
                 // Cmd-H has no key equivalent and does nothing.
                 #[cfg(target_os = "macos")]
@@ -279,12 +276,6 @@ pub(crate) fn menus(layout: Layout) -> Vec<Menu> {
             disabled: false,
             items: vec![
                 MenuItem::action("Show herdr non-detected modal", ShowHerdrNotDetected),
-                MenuItem::action("Show app update available", ShowUpdatePreview),
-                MenuItem::action(
-                    "Show update download progress (50%)",
-                    ShowUpdateDownloadPreview,
-                ),
-                MenuItem::action("Show Homebrew update progress", ShowUpdateHomebrewPreview),
                 MenuItem::action("Play Sound", PlaySound),
                 MenuItem::action("Ring Bell in 3 Seconds", RingBellPreview),
                 #[cfg(target_os = "macos")]
