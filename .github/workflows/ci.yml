@@ -1,0 +1,35 @@
+# Format, lint and test for this repository. The repository ruleset "ci" requires the job.
+name: ci
+
+on:
+  pull_request:
+  # Fills the Rust build cache that pull requests read.
+  push:
+    branches: [develop]
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: format, lint and test
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Install Linux build dependencies
+        run: bash scripts/install-linux-deps.sh
+      - name: Install the pinned Rust toolchain
+        run: rustup toolchain install
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          save-if: ${{ github.ref == 'refs/heads/develop' }}
+      - name: Check formatting
+        run: cargo fmt --all -- --check
+      - name: Lint every target and feature (clippy)
+        run: cargo clippy --locked --workspace --all-targets --all-features -- -D warnings
+      - name: Test default features
+        run: cargo test --locked --workspace
+      - name: Test all features
+        run: cargo test --locked --workspace --all-features
