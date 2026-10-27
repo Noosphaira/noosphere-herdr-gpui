@@ -159,11 +159,7 @@ sign-release *args:
 verify-release *args:
     ./scripts/verify-release.sh {{args}}
 
-# Check commit subjects the way CI does; the changelog is generated from them.
-check-commits base="origin/main":
-    python3 scripts/release/check-commit-messages.py range "{{base}}..HEAD"
-
-# Install the commit-msg hook for this checkout and every worktree of it.
+# Use the hooks in .githooks for this checkout and every worktree of it.
 hooks:
     git config core.hooksPath .githooks
     @echo "core.hooksPath = .githooks"

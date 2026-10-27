@@ -2,6 +2,14 @@
 
 <!-- The problem, and the approach you chose. Constraints that shaped it. -->
 
+## Category
+
+<!-- feature, bugfix, documentation, refactor, test or chore (same as the branch name prefix). Pull requests to master: release. -->
+
+## User review
+
+<!-- Pull requests to develop: date of the user's approval, and how the change was run (command, URL). -->
+
 ## Validation
 
 <!-- Commands you actually ran, and their result. Delete what does not apply. -->
@@ -25,3 +33,9 @@
      native or manual check could not be run. -->
 
 - [ ] Describe the manual check
+
+## AI disclosure
+
+<!-- Required. Tick exactly one box. -->
+- [ ] No AI tools were used.
+- [ ] AI tools were used: <agent and model>. The output was reviewed and verified.

@@ -1,5 +1,54 @@
 #!/usr/bin/env bash
-# Installed by `just hooks`. The subject becomes one line of the release
-# changelog, so it is checked before the commit exists rather than after.
-set -euo pipefail
-exec python3 "$(git rev-parse --show-toplevel)/scripts/release/check-commit-messages.py" message "$1"
+# Checks the subject line length, the Assisted-by trailer format,
+# and rejects Co-authored-by or Signed-off-by trailers that name an AI agent.
+set -eo pipefail
+# shellcheck source=lib/common.sh
+. "$(dirname "$0")/lib/common.sh"
+
+msg_file="$1"
+comment_char="$(git config core.commentChar || true)"
+case "$comment_char" in
+  "" | auto) comment_char="#" ;;
+esac
+
+# Message without comment lines. Text below the scissors line of `git commit -v` is dropped.
+message="$(awk -v c="$comment_char" '
+  index($0, c " ------------------------ >8 ------------------------") == 1 { exit }
+  index($0, c) == 1 { next }
+  { print }
+' "$msg_file")"
+
+subject="$(printf '%s\n' "$message" | awk 'NF { print; exit }')"
+[ -n "$subject" ] || hook_fail "commit-msg: the commit message is empty."
+
+case "$subject" in
+  "Merge "* | "Revert "* | "fixup! "* | "squash! "* | "amend! "*) ;;
+  *)
+    if [ "${#subject}" -gt 72 ]; then
+      hook_fail "commit-msg: the subject line has ${#subject} characters. The limit is 72." \
+        "Subject: $subject"
+    fi
+    ;;
+esac
+
+errors=""
+while IFS= read -r line; do
+  case "$line" in
+    [Aa]ssisted-[Bb]y:*)
+      if ! [[ "$line" =~ $ASSISTED_BY_PATTERN ]]; then
+        errors+="Malformed trailer: '$line'. Format: Assisted-by: <agent>:<model>"$'\n'
+      fi
+      ;;
+  esac
+  shopt -s nocasematch
+  if [[ "$line" =~ ^(co-authored-by|signed-off-by): ]] && [[ "$line" =~ $AI_IDENTITY_PATTERN ]]; then
+    errors+="AI agent named in trailer: '$line'. Use Assisted-by: <agent>:<model>"$'\n'
+  fi
+  shopt -u nocasematch
+done <<< "$message"
+
+if [ -n "$errors" ]; then
+  hook_fail "commit-msg:" "${errors%$'\n'}"
+fi
+
+run_local_hook commit-msg "$@"
