@@ -63,7 +63,7 @@ Do not push and do not open a pull request before the user approves.
      "repos/$(gh repo view --json owner --jq .owner.login)/.github/contents/pull_request_template.md"
    ```
 
-4. Write the pull request body to a file outside the repository (`body=$(mktemp)`). Fill every section of the template. Tick exactly one AI disclosure box.
+4. Write the pull request body to a file outside the repository (`body=$(mktemp)`). Fill every section of the template.
 5. `gh pr create --base develop --head "$(git branch --show-current)" --title "<title>" --body-file "$body"`
    Title: imperative mood, at most 72 characters.
 6. When the user approved a change over the size limit:
