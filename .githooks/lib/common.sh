@@ -1,3 +1,4 @@
+# shellcheck shell=bash
 # Shared definitions for the hooks in .githooks.
 # Maintained in the rules repository and synced. Project hooks go in .githooks/local/.
 
@@ -8,6 +9,8 @@ BRANCH_CATEGORIES="feature|bugfix|documentation|refactor|test|chore"
 BRANCH_PATTERN="^(${BRANCH_CATEGORIES})/[a-z0-9]+(-[a-z0-9]+)*$"
 ASSISTED_BY_PATTERN='^Assisted-by: [A-Za-z0-9._-]+:[A-Za-z0-9._-]+( \[[A-Za-z0-9._ -]+\])*$'
 AI_IDENTITY_PATTERN='(claude|anthropic|copilot|openai|codex|chatgpt|gemini|cursor|devin)'
+# Largest file a commit may add or change, in bytes (5 MiB).
+MAX_FILE_BYTES=5242880
 
 # Prints each argument on its own line to stderr and exits with status 1.
 hook_fail() {
