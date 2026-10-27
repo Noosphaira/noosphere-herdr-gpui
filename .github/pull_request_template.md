@@ -33,9 +33,3 @@
      native or manual check could not be run. -->
 
 - [ ] Describe the manual check
-
-## AI disclosure
-
-<!-- Required. Tick exactly one box. -->
-- [ ] No AI tools were used.
-- [ ] AI tools were used: <agent and model>. The output was reviewed and verified.
