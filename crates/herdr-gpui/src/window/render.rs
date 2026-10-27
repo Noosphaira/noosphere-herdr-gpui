@@ -4,8 +4,7 @@
 
 use super::HerdrWindow;
 use crate::{
-    CheckForUpdates, GUI_VERSION, Minimize, PlaySound, RunCommand, ShowHerdrNotDetected,
-    ShowUpdatePreview,
+    GUI_VERSION, Minimize, PlaySound, RunCommand, ShowHerdrNotDetected,
     actions::{RingBellPreview, ShowToastPreview},
     browser::{Pick, Shown, Slot},
     config::ClipboardToastPosition,
@@ -663,36 +662,6 @@ impl Render for HerdrWindow {
             .on_action(cx.listener(|this, _: &ShowHerdrNotDetected, window, cx| {
                 this.show_install_modal(window, cx);
             }))
-            .on_action(cx.listener(|this, _: &CheckForUpdates, window, cx| {
-                this.open_app_update(false, window, cx);
-                this.updater.check();
-            }))
-            .on_action(cx.listener(|this, _: &ShowUpdatePreview, window, cx| {
-                this.open_app_update(true, window, cx);
-            }))
-            .on_action(cx.listener(
-                |this, _: &crate::actions::ShowUpdateDownloadPreview, window, cx| {
-                    this.open_update_progress_preview(
-                        crate::updater::State::Downloading {
-                            received: 50_000_000,
-                            total: 100_000_000,
-                        },
-                        window,
-                        cx,
-                    );
-                },
-            ))
-            .on_action(cx.listener(
-                |this, _: &crate::actions::ShowUpdateHomebrewPreview, window, cx| {
-                    this.open_update_progress_preview(
-                        crate::updater::State::Upgrading {
-                            detail: "Refreshing Homebrew metadata with brew update...".into(),
-                        },
-                        window,
-                        cx,
-                    );
-                },
-            ))
             .on_action(cx.listener(|this, action: &ShowToastPreview, _, cx| {
                 this.show_toast_preview(action.kind, cx);
             }))
@@ -951,21 +920,10 @@ impl Render for HerdrWindow {
                                             .whitespace_nowrap()
                                             .cursor_pointer()
                                             .hover(|s| s.bg(rgb(self.theme.active)))
-                                            // A waiting update is the one status here worth
-                                            // interrupting for, so it takes the accent color
-                                            // the rest of the chrome reserves for chosen rows.
-                                            .text_color(rgb(if self.updater.update_available() {
-                                                self.theme.primary()
-                                            } else {
-                                                self.theme.muted
-                                            }))
-                                            .child(if self.updater.update_available() {
-                                                "Update available".into()
-                                            } else {
-                                                self.version_label()
-                                            })
+                                            .text_color(rgb(self.theme.muted))
+                                            .child(self.version_label())
                                             .on_click(cx.listener(|this, _, window, cx| {
-                                                this.open_app_update(false, window, cx);
+                                                this.open_about(window, cx);
                                             })),
                                     ),
                             ),

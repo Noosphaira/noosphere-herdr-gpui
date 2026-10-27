@@ -41,34 +41,6 @@ fn qa_menu_sends_a_delayed_system_notification() {
 }
 
 #[test]
-#[cfg(feature = "qa-menu")]
-fn qa_menu_carries_update_progress_previews() {
-    let menus = menus(Layout::default());
-    let qa = menus
-        .iter()
-        .find(|menu| menu.name.as_ref() == "QA")
-        .unwrap();
-    for (label, expected) in [
-        (
-            "Show update download progress (50%)",
-            Box::new(ShowUpdateDownloadPreview) as Box<dyn gpui::Action>,
-        ),
-        (
-            "Show Homebrew update progress",
-            Box::new(ShowUpdateHomebrewPreview),
-        ),
-    ] {
-        assert!(
-            qa.items.iter().any(|item| matches!(item,
-                MenuItem::Action { name, action, .. }
-                    if name.as_ref() == label && action.partial_eq(expected.as_ref())
-            )),
-            "{label}"
-        );
-    }
-}
-
-#[test]
 fn view_menu_lists_every_layout_in_groups_and_checks_the_current_one() {
     for current in LayoutMode::ALL {
         let menus = menus(Layout {
@@ -342,7 +314,6 @@ fn macos_menus_carry_hide_and_minimize(cx: &mut gpui::TestAppContext) {
             "Command Palette",
             "Settings",
             "Keyboard Shortcuts",
-            "Check for Updates...",
             "Hide Herdr",
             "Hide Others",
             "Show All",
@@ -398,7 +369,6 @@ fn hide_and_minimize_are_macos_only() {
             "Command Palette",
             "Settings",
             "Keyboard Shortcuts",
-            "Check for Updates...",
             "Quit Herdr",
         ]
     );

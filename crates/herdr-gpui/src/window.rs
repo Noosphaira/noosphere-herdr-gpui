@@ -55,7 +55,7 @@ use crate::{
     sessions, sidebar,
     state::LiveState,
     terminal::{Selection, WheelAccumulator},
-    terminal_painter, updater,
+    terminal_painter,
 };
 use gpui::{prelude::*, *};
 use herdr_client::{ConnectOptions, ConnectTarget};
@@ -68,8 +68,6 @@ pub(crate) use server_keys::ActiveServerKeymap;
 pub(crate) struct HerdrWindow {
     pub(crate) sound: crate::sound::Service,
     pub(crate) bell: crate::bell::Bell,
-    pub(crate) updater: updater::Updater,
-    pub(crate) update_preview: Option<updater::State>,
     /// Prepared daemon announcement and release notes text.
     pub(crate) daemon_text: crate::release_notes::DaemonText,
     pub(crate) config: config::Config,
@@ -340,17 +338,6 @@ impl HerdrWindow {
     }
 
     fn tick(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        if self.updater.poll() {
-            match self.updater.commit_restart() {
-                Ok(true) => {
-                    cx.quit();
-                    return;
-                }
-                Ok(false) => {}
-                Err(error) => eprintln!("App update restart failed: {error}"),
-            }
-            cx.notify();
-        }
         if self.avatars.as_mut().is_some_and(|avatars| avatars.poll()) {
             cx.notify();
         }
@@ -669,8 +656,6 @@ impl HerdrWindow {
         let mut this = Self {
             sound: crate::sound::Service::default(),
             bell: crate::bell::Bell::default(),
-            updater: updater::Updater::default(),
-            update_preview: None,
             daemon_text: Default::default(),
             configured_terminal_size: config.terminal.size,
             gui_config_diagnostic: {

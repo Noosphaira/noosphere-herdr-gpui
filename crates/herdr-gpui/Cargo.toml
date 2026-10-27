@@ -16,8 +16,6 @@ anyhow.workspace               = true
 cbc.workspace                  = true
 chrono.workspace               = true
 config_loader.workspace        = true
-ed25519-dalek.workspace        = true
-flate2.workspace               = true
 gpui.workspace                 = true
 # Unlike gpui 0.2.2, the platform crate enables nothing by default: without
 # font-kit (macOS) or a Linux backend, text silently goes to a no-op system.
@@ -51,7 +49,8 @@ uuid.workspace                 = true
 zeroize.workspace              = true
 
 [dev-dependencies]
-gpui = { features = ["test-support"], workspace = true }
+flate2.workspace = true
+gpui             = { features = ["test-support"], workspace = true }
 
 [features]
 qa-menu = []

@@ -40,7 +40,7 @@ fn notice_names_the_side_to_update_and_where() {
     assert_eq!(newer.title(), "Herdr GPUI needs an update");
     assert_eq!(
         newer.body(),
-        "The Herdr server on build box (version 2.0.0) is newer than this app supports. Update this app to connect."
+        "The Herdr server on build box (version 2.0.0) is newer than this app supports. Build this app from its latest source to connect."
     );
 }
 
@@ -96,7 +96,7 @@ fn a_refused_handshake_is_announced_once_and_copies_the_command(cx: &mut gpui::T
 }
 
 #[gpui::test]
-fn a_newer_daemon_offers_the_app_update(cx: &mut gpui::TestAppContext) {
+fn a_newer_daemon_offers_only_dismissal(cx: &mut gpui::TestAppContext) {
     let (view, cx) = cx.add_window_view(fixture_window);
     cx.update(|window, cx| {
         view.update(cx, |view, cx| {
@@ -109,6 +109,8 @@ fn a_newer_daemon_offers_the_app_update(cx: &mut gpui::TestAppContext) {
         full_draw(window, cx).clear(cx);
     });
     assert!(cx.debug_bounds("version-mismatch-command").is_none());
+    assert!(cx.debug_bounds("version-mismatch-action").is_none());
+    assert!(cx.debug_bounds("version-mismatch-dismiss").is_some());
     cx.simulate_keystrokes("enter");
-    cx.update(|_, cx| assert_eq!(view.read(cx).menu.page, Some(Page::AppUpdate)));
+    cx.update(|_, cx| assert_eq!(view.read(cx).menu.page, None));
 }

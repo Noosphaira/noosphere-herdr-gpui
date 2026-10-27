@@ -16,7 +16,6 @@ pub(super) async fn verify_remote(cx: &mut AsyncApp) -> Result<()> {
                 target: "clipboard-fixture.invalid".into(),
                 session: "default".into(),
             },
-            updater::Updater::secondary(),
             cx,
             false,
         )

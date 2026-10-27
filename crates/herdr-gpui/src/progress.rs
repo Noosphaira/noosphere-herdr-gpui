@@ -8,8 +8,6 @@ use std::time::Duration;
 pub(crate) enum Progress {
     /// No reliable fraction: a segment slides back and forth.
     Busy,
-    /// A settled fraction.
-    Fraction(f32),
     /// A fraction whose current part is still running, so the fill pulses
     /// and the bar never looks stalled during one long part.
     Working(f32),
@@ -23,7 +21,6 @@ pub(crate) fn bar(name: &'static str, progress: Progress, accent: Hsla, track: H
         .rounded_full()
         .bg(accent);
     let fill = match progress {
-        Progress::Fraction(fraction) => fill.w(relative(fraction.clamp(0., 1.))).into_any_element(),
         Progress::Working(fraction) => fill
             .w(relative(fraction.clamp(0., 1.)))
             .with_animation(

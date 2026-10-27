@@ -36,7 +36,7 @@ def main():
     if len(identities) != 1:
         raise ValueError("Input binaries have different build identities")
     worktree, _, _ = identities.pop()
-    icons = Path(__file__).resolve().parents[2] / "assets/icons"
+    icons = Path(__file__).resolve().parents[1] / "assets/icons"
     # macOS: the flattened .icns for CFBundleIconFile, then the Icon Composer
     # asset catalog for CFBundleIconName, which macOS 26 and later prefer.
     if sys.argv[1] == "macos":

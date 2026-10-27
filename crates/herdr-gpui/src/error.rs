@@ -1,5 +1,4 @@
 //! Internal failures retain their categories and sources until presentation.
-pub use crate::updater::UpdateError;
 use std::{
     io,
     path::{Path, PathBuf},
@@ -461,8 +460,6 @@ pub enum Error {
     #[error("Could not start watching the pane's processes.")]
     ProcessesWorker(#[source] io::Error),
     #[error("{0}")]
-    Update(#[from] UpdateError),
-    #[error("{0}")]
     Io(#[from] io::Error),
     #[error("{0}")]
     Toml(#[from] toml::de::Error),
@@ -805,20 +802,6 @@ mod tests {
         assert!(
             message.contains("invalid peer certificate: UnknownIssuer"),
             "{message}"
-        );
-    }
-
-    #[test]
-    fn updater_wrapper_preserves_source_chain() {
-        let error = Error::from(UpdateError::Io(io::Error::from(io::ErrorKind::BrokenPipe)));
-        assert!(matches!(error, Error::Update(_)));
-        assert_eq!(
-            error
-                .source()
-                .and_then(|source| source.source())
-                .and_then(|source| source.downcast_ref::<io::Error>())
-                .map(io::Error::kind),
-            Some(io::ErrorKind::BrokenPipe)
         );
     }
 

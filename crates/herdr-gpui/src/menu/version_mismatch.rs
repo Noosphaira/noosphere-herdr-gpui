@@ -52,9 +52,9 @@ impl Notice {
             VersionMismatch::DaemonOutdated { .. } => format!(
                 "{problem} Run this command {wherever}; the app reconnects once the updated server is running."
             ),
-            VersionMismatch::ClientOutdated { .. } => {
-                format!("{server} is newer than this app supports. Update this app to connect.")
-            }
+            VersionMismatch::ClientOutdated { .. } => format!(
+                "{server} is newer than this app supports. Build this app from its latest source to connect."
+            ),
         }
     }
 }
@@ -96,7 +96,8 @@ impl HerdrWindow {
         self.menu.page = Some(Page::VersionMismatch);
     }
 
-    /// The notice's primary action, also bound to Enter.
+    /// The notice's primary action, also bound to Enter. An outdated app has
+    /// no update to offer, so Enter only dismisses its notice.
     pub(super) fn act_on_version_mismatch(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let Some(notice) = &self.menu.version_notice else {
             return;
@@ -107,7 +108,7 @@ impl HerdrWindow {
                 self.show_flash(Flash::success(format!("Copied `{UPDATE_COMMAND}`")), cx);
                 self.dismiss_menu(window, cx);
             }
-            VersionMismatch::ClientOutdated { .. } => self.open_app_update(false, window, cx),
+            VersionMismatch::ClientOutdated { .. } => self.dismiss_menu(window, cx),
         }
     }
 
@@ -161,28 +162,23 @@ impl HerdrWindow {
                     .flex_wrap()
                     .gap(px(8.))
                     .p(px(8.))
-                    .child(
-                        button(
-                            "version-mismatch-action",
-                            if daemon {
-                                "Copy Command"
-                            } else {
-                                "Check for Updates"
-                            },
-                            true,
+                    .when(daemon, |row| {
+                        row.child(
+                            button("version-mismatch-action", "Copy Command", true).on_click(
+                                cx.listener(|this, _, window, cx| {
+                                    cx.stop_propagation();
+                                    this.act_on_version_mismatch(window, cx);
+                                }),
+                            ),
                         )
-                        .on_click(cx.listener(|this, _, window, cx| {
-                            cx.stop_propagation();
-                            this.act_on_version_mismatch(window, cx);
-                        })),
-                    )
+                    })
                     .child(
-                        button("version-mismatch-dismiss", "Dismiss", false).on_click(cx.listener(
-                            |this, _, window, cx| {
+                        button("version-mismatch-dismiss", "Dismiss", !daemon).on_click(
+                            cx.listener(|this, _, window, cx| {
                                 cx.stop_propagation();
                                 this.dismiss_menu(window, cx);
-                            },
-                        )),
+                            }),
+                        ),
                     ),
             )
     }

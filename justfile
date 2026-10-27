@@ -41,16 +41,6 @@ test-live binary:
 test-gui binary:
     HERDR_TEST_BINARY="{{binary}}" cargo test --locked -p herdr-gpui --features integration-test --test live_gui -- --ignored --nocapture --test-threads=1
 
-# Explicit opt-in: reads the real code signature and Homebrew records of an
-# installed app. Never discovers an installation on its own.
-test-update bundle:
-    HERDR_TEST_BUNDLE="{{bundle}}" cargo test --locked -p herdr-gpui updater::install::tests::signing::installed_bundle -- --ignored --nocapture
-    HERDR_TEST_BUNDLE="{{bundle}}" cargo test --locked -p herdr-gpui updater::brew::tests::the_real_cask -- --ignored --nocapture
-
-# Really upgrades the installed app through Homebrew; restart it afterwards.
-test-brew-upgrade bundle expected:
-    HERDR_TEST_BUNDLE="{{bundle}}" HERDR_TEST_BREW_EXPECTED="{{expected}}" HERDR_TEST_BREW_UPGRADE=1 cargo test --locked -p herdr-gpui updater::brew::tests::homebrew_really_installs -- --ignored --nocapture
-
 # Repeat the Linux suite under CPU pressure in a container, where scheduling
 # races reproduce that a fast machine hides. Needs Docker; nothing else.
 stress-linux iterations="30" cpus="0.5" filter="":
@@ -109,7 +99,7 @@ bundle profile="release" features="":
     # LaunchServices and the Dock cache icons by bundle ID, so every worktree
     # build sharing the release ID competed with the installed app's icon.
     plutil -replace CFBundleIdentifier -string so.pen.herdr-gpui.dev "$app/Contents/Info.plist"
-    icons=$(python3 scripts/release/build-icon.py macos "$app/Contents/MacOS/Herdr")
+    icons=$(python3 scripts/build-icon.py macos "$app/Contents/MacOS/Herdr")
     cp "${icons%$'\n'*}" "$app/Contents/Resources/Herdr.icns"
     cp "${icons##*$'\n'}" "$app/Contents/Resources/Assets.car"
     plutil -lint "$app/Contents/Info.plist"
@@ -125,9 +115,9 @@ test-build: build-release
 
 ci: format-check lint test
 
-# Cross type-check the Windows target without a Windows machine. CI lints the
-# MSVC target on a Windows runner; this uses the GNU target because a Mac or
-# Linux host cannot supply the MSVC C toolchain some dependencies build against.
+# Cross type-check the Windows target without a Windows machine. This uses the
+# GNU target because a Mac or Linux host cannot supply the MSVC C toolchain some
+# dependencies build against.
 # Needs `rustup target add x86_64-pc-windows-gnu` and mingw-w64
 # (`brew install mingw-w64`, or `apt install gcc-mingw-w64-x86-64`).
 lint-windows:
@@ -136,59 +126,18 @@ lint-windows:
     cargo clippy --locked --workspace --all-targets --all-features \
         --target x86_64-pc-windows-gnu -- -D warnings
 
-# Clippy for Linux in the Ubuntu 24.04 that CI uses, from any host with Docker.
+# Clippy for Linux in an Ubuntu 24.04 container, from any host with Docker.
 # A cfg gate that is wrong only on Linux is invisible from macOS, and
 # lint-windows only covers Windows. The container runs the host architecture;
 # pass a platform, for example linux/amd64 on Apple Silicon, for the other one.
 lint-linux platform="":
     bash scripts/lint-linux.sh {{platform}}
 
-# Audit the GitHub workflows for injection, over-broad permissions, and unpinned actions.
-audit-workflows:
-    zizmor .github/
-
 # License, advisory, and source checks over the dependency graph.
 audit-deps:
     cargo deny check
-
-# Sign published release artifacts with the local GPG key (YubiKey). Not a CI step.
-sign-release *args:
-    ./scripts/gpg-sign-release.sh {{args}}
-
-# Verify published checksums, Sigstore and provenance; optional local GPG approval.
-verify-release *args:
-    ./scripts/verify-release.sh {{args}}
 
 # Use the hooks in .githooks for this checkout and every worktree of it.
 hooks:
     git config core.hooksPath .githooks
     @echo "core.hooksPath = .githooks"
-
-# What changed since the last release tag, straight from git history.
-changelog-unreleased:
-    git-cliff --config cliff.toml --unreleased
-
-# The whole generated changelog; it is never tracked in git.
-changelog:
-    git-cliff --config cliff.toml
-
-# Exactly what a release would publish: CHANGELOG.md and RELEASE_NOTES.md.
-changelog-release version output:
-    bash scripts/release/generate-changelog.sh "{{version}}" "{{output}}"
-
-# Owner-only remote release; CI derives the YYYYMMDD.COUNTER version itself.
-release:
-    bash scripts/release/dispatch.sh
-
-# Local universal signed/notarized DMG; does not publish anything.
-dmg $VERSION:
-    bash scripts/release/build-macos.sh "$VERSION"
-
-# Static checks and mocked release tests; does not dispatch or publish anything.
-release-check:
-    for script in scripts/*.sh scripts/release/*.sh; do bash -n "$script" || exit; done
-    PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s scripts/release/tests -v
-    PYTHONDONTWRITEBYTECODE=1 python3 scripts/release/test-release-security.py
-    actionlint .github/workflows/*.yml
-    zizmor .github/
-    git diff --check

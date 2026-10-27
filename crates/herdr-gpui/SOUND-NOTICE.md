@@ -18,8 +18,8 @@ Embedded MP3s decode directly from memory; custom MP3 reads and playback are bou
 Rodio 0.22.2 is MIT OR Apache-2.0; CPAL 0.17.3 is Apache-2.0.
 The unmodified Symphonia 0.5.5 MP3 decoder crates (`symphonia`,
 `symphonia-bundle-mp3`, `symphonia-core`, `symphonia-metadata`) remain MPL-2.0.
-Release third-party notices include their license texts and exact source-download
-URLs, with version-scoped reviews in `scripts/release/generate-notices.py`.
+A binary distribution must include their license texts and the source location
+of the MPL-2.0 crates.
 Linux dynamically links the system ALSA library; it is not bundled.
 
 `assets/sounds/done.mp3` and `assets/sounds/request.mp3` at the repository root

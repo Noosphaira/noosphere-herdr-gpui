@@ -123,7 +123,7 @@ pub(crate) enum Store {
 
 // A macOS development build is unsigned and gets a fresh code identity on every
 // rebuild, so macOS would re-prompt for the Keychain item's ACL on every run.
-// Only the signed release pipeline sets `HERDR_RELEASE_VERSION`, so only it uses
+// Only a signed release build sets `HERDR_RELEASE_VERSION`, so only it uses
 // Keychain. The Secret Service grants access per user session, not per binary,
 // so every Linux build uses it.
 pub(super) const KEYRING: bool =
