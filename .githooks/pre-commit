@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 # Rejects commits on develop and master, commits on branches with invalid names,
-# and commits while Claude instruction files exist in the working tree.
+# commits while Claude instruction files exist in the working tree, staged
+# whitespace errors and conflict markers, staged files over MAX_FILE_BYTES,
+# and staged secrets (gitleaks).
 set -eo pipefail
 # shellcheck source=lib/common.sh
 . "$(dirname "$0")/lib/common.sh"
@@ -31,6 +33,37 @@ if [ -n "$instruction_files" ]; then
   hook_fail "pre-commit: Claude instruction files found. Instructions for this repository go in AGENTS.md:" \
     "$instruction_files" \
     "Move their content to AGENTS.md, or to ~/.claude/CLAUDE.md for personal instructions, and delete the files."
+fi
+
+# Whitespace errors and conflict markers in the staged changes.
+if ! check_output="$(git diff --cached --check)"; then
+  hook_fail "pre-commit: the staged changes have whitespace errors or conflict markers:" \
+    "$check_output" \
+    "Fix them and stage the files again."
+fi
+
+# Staged files over the size limit: build output, binaries, data dumps.
+large_files=""
+while IFS= read -r -d '' path; do
+  size="$(git cat-file -s ":$path" 2>/dev/null || echo 0)"
+  if [ "$size" -gt "$MAX_FILE_BYTES" ]; then
+    large_files+="$path ($size bytes)"$'\n'
+  fi
+done < <(git diff --cached --name-only --diff-filter=ACMR -z)
+if [ -n "$large_files" ]; then
+  hook_fail "pre-commit: staged files are larger than $MAX_FILE_BYTES bytes:" \
+    "${large_files%$'\n'}" \
+    "Unstage them with git restore --staged <path>, and add build output to .gitignore."
+fi
+
+# Secrets in the staged changes.
+if ! command -v gitleaks > /dev/null; then
+  hook_fail "pre-commit: gitleaks is not installed. It scans the staged changes for secrets." \
+    "Install it: a release from https://github.com/gitleaks/gitleaks/releases, pacman -S gitleaks, or brew install gitleaks."
+fi
+if ! gitleaks git --pre-commit --redact --staged --verbose --no-banner; then
+  hook_fail "pre-commit: gitleaks found a possible secret in the staged changes (redacted above)." \
+    "Remove it from the change. For a false positive, add the finding's fingerprint to .gitleaksignore."
 fi
 
 run_local_hook pre-commit "$@"

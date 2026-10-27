@@ -96,6 +96,8 @@ Read this file with `README.md`, the relevant crate documentation and the code b
 - Do not add a crate, runtime, service container or speculative transport abstraction without a concrete need. Sibling checkouts are references, not build dependencies.
 
 ### Build, test and lint
+`.github/workflows/ci.yml` runs the format, lint and test steps below on every pull request (job `format, lint and test`). A repository ruleset requires it on `develop` and `master`.
+
 Use the `just` recipes. Run focused tests while iterating. Before user review of a Rust change, run:
 
 ```sh
