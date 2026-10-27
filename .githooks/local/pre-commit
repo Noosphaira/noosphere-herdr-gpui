@@ -1,0 +1,9 @@
+#!/usr/bin/env bash
+# Runs the secret scan installed as .git/hooks/pre-commit (services-and-setups, Security/git-hooks).
+# core.hooksPath .githooks makes git skip .git/hooks, so this hook calls it.
+# The scan stays in .git/hooks, outside the working tree, so agents cannot change it.
+set -eo pipefail
+hook="$(git rev-parse --path-format=absolute --git-common-dir)/hooks/pre-commit"
+if [ -x "$hook" ]; then
+  "$hook" "$@"
+fi

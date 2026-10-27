@@ -48,7 +48,6 @@ impl HerdrWindow {
         // Whatever the pointer was resting on, this dismissal ends that intent.
         self.hover = None;
         self.hover_menu = None;
-        self.update_preview = None;
         self.dismiss_release_notes();
         // Closing the offer without an answer is a "not now": it asks once.
         if self.menu.page == Some(Page::AgentSkill)
@@ -104,8 +103,6 @@ impl HerdrWindow {
             "command palette",
             "workspaces",
             "reload GUI config",
-            "app updates",
-            "preview app update",
             "GitHub sign-in",
             "about",
         ];
@@ -153,8 +150,6 @@ impl HerdrWindow {
             "command palette" => self.open_palette(crate::palette::Filter::All, window, cx),
             "workspaces" => self.open_palette(crate::palette::Filter::Navigation, window, cx),
             "update ready" | "what's new" => self.menu.page = Some(Page::Update),
-            "app updates" => self.open_app_update(false, window, cx),
-            "preview app update" => self.open_app_update(true, window, cx),
             "reload GUI config" => self.reload_gui_config(window, cx),
             "reload daemon config" => {
                 self.reload_daemon_config();
@@ -431,7 +426,6 @@ impl HerdrWindow {
                         | Page::Fonts
                         | Page::Palette
                         | Page::Preferences
-                        | Page::AppUpdate
                         | Page::GitHub
                         | Page::AddDevice
                         | Page::AddWsl
@@ -484,11 +478,7 @@ impl HerdrWindow {
             .when(
                 matches!(
                     page,
-                    Page::AppUpdate
-                        | Page::AddDevice
-                        | Page::AddWsl
-                        | Page::RenameDevice
-                        | Page::ForwardPort
+                    Page::AddDevice | Page::AddWsl | Page::RenameDevice | Page::ForwardPort
                 ),
                 |panel| panel.flex().flex_col().overflow_hidden().shadow_lg(),
             )
@@ -613,8 +603,6 @@ impl HerdrWindow {
             panel = panel.child(self.render_close_confirmation(cx));
         } else if page == Page::Preferences {
             panel = panel.child(self.render_preferences(cx));
-        } else if page == Page::AppUpdate {
-            panel = panel.child(self.render_app_update(window, cx));
         } else if page == Page::About {
             panel = panel.child(self.render_about(cx));
         } else if page == Page::AgentSkill {

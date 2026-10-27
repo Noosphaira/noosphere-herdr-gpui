@@ -1,0 +1,36 @@
+#!/usr/bin/env bash
+# Rejects commits on develop and master, commits on branches with invalid names,
+# and commits while Claude instruction files exist in the working tree.
+set -eo pipefail
+# shellcheck source=lib/common.sh
+. "$(dirname "$0")/lib/common.sh"
+
+branch="$(git symbolic-ref --short -q HEAD || true)"
+
+# An empty branch means a detached HEAD (rebase, cherry-pick, bisect). Branch checks are skipped.
+if [ -n "$branch" ]; then
+  if is_protected_branch "$branch"; then
+    hook_fail "pre-commit: commits to '$branch' are not allowed." \
+      "Create a branch: git switch -c <category>/<description> origin/develop" \
+      "Move uncommitted changes with it: git stash, git switch -c <branch> origin/develop, git stash pop"
+  fi
+  if ! [[ "$branch" =~ $BRANCH_PATTERN ]]; then
+    print_branch_rule
+    hook_fail "pre-commit: branch name '$branch' does not match the format." \
+      "Rename the branch: git branch -m <category>/<description>"
+  fi
+fi
+
+instruction_files="$(
+  {
+    git ls-files --cached --others --exclude-standard
+    git ls-files --others --ignored --exclude-standard --directory
+  } | grep -E '(^|/)CLAUDE(\.local)?\.md$' | sort -u || true
+)"
+if [ -n "$instruction_files" ]; then
+  hook_fail "pre-commit: Claude instruction files found. Instructions for this repository go in AGENTS.md:" \
+    "$instruction_files" \
+    "Move their content to AGENTS.md, or to ~/.claude/CLAUDE.md for personal instructions, and delete the files."
+fi
+
+run_local_hook pre-commit "$@"

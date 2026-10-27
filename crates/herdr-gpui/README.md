@@ -1,8 +1,8 @@
 # Herdr Native Shell
 
 A GPUI 0.3.6 (`gpui-pre`) client for a Local daemon and saved SSH hosts, with macOS
-support, experimental Linux x86_64/ARM64 builds, and an experimental Windows build with
-headless CI coverage. See [Windows](#windows) for what is unavailable there.
+support, experimental Linux x86_64/ARM64 builds, and an experimental Windows build
+that is only cross-checked. See [Windows](#windows) for what is unavailable there.
 It starts an installed local `herdr server` when absent; explicit socket and
 development targets remain attach-only. On Unix, GUI launches resolve the login-shell
 environment once on the connection worker so daemon plugins can find tools such as
@@ -63,38 +63,10 @@ are not restored. Geometry is stored in `window-state.json` under
 `$XDG_STATE_HOME/herdr/gpui`, or `~/.local/state/herdr/gpui` by default. Native
 test modes skip this state. Up to 64 main windows are restored.
 
-The Rust GitHub updater verifies signed archive manifests and presents a shared
-GPUI panel through **app updates** in the sidebar menu or **Herdr > Check for
-Updates...**. Background offers change the status version label without taking
-focus. Download and **Install and Restart** are separate approvals; closing the
-panel does not cancel work. Explicit **Cancel** requests cancellation.
-The panel shows archive download progress and an animated bar for work without a
-known percentage. Homebrew-managed installs use `brew upgrade --cask herdr-gpui`;
-if the installed version is behind the offer, `brew update` refreshes metadata
-before one retry. Homebrew upgrades cannot be cancelled mid-install.
-The existing UI timer polls the updater mailbox; workers own blocking work, and
-the restart helper is dispatched before CLI parsing or GPUI startup.
-
-Only normal launches with a calendar release version `YYYYMMDD.COUNTER` (tag
-`vYYYYMMDD.COUNTER`) and embedded public signing key start the service. Test
-fixtures use a disabled, worker-free updater. Update targets are macOS app
-bundles and user-owned Linux executables under `HOME` on x86_64/aarch64
-GNU systems, not arbitrary packages or a claim of full Linux app support.
-**QA > Show app update available** and the sidebar's **preview app update** use
-independent synthetic version `9999.0.0`: Download becomes Ready and Install and
-Restart only dismisses the panel. No preview action reaches the updater service or quits.
-**QA > Show update download progress (50%)** displays a half-filled bar;
-**QA > Show Homebrew update progress** displays the animated activity bar.
-Both remain visible until dismissed and never run a real update.
-See [update setup and QA](../../docs/updating.md).
-The protected release workflow builds both macOS and both Linux architectures
-with the required public key. Linux manual `Herdr-VERSION-TARGET.tar.gz` archives
-include desktop integration and notices; updater-only
-`herdr-gpui-VERSION-TARGET-update.tar.gz` archives contain one executable.
-Native two-version update/restart QA remains pending.
+The app has no updater. Build it from source again to update it.
 
 The macOS **QA** menu requires the opt-in `qa-menu` Cargo feature and is excluded
-from default Cargo builds and published releases. `just run` enables it
+from default Cargo builds. `just run` enables it
 automatically, or use
 `cargo run --locked --release -p herdr-gpui --features qa-menu`.
 The menu offers **Show NeedsAttention toast**, **Show Finished
@@ -105,7 +77,7 @@ delay, active-target suppression, and agent evidence checks. It uses the configu
 corner, normal kind-specific lifetime, and dismiss button.
 NeedsAttention and Finished previews retain the current target,
 when available, so clicking them tests normal navigation; other previews are inert.
-Creating previews does not contact the daemon or updater. Close any in-app
+Creating previews does not contact the daemon. Close any in-app
 panel first: toasts remain hidden while a panel is open.
 
 **Send notification in 3 seconds** waits long enough to switch to another app,
@@ -274,8 +246,8 @@ A daemon that refuses the handshake because it is too old, or newer than this
 app supports, opens a notice naming the host, its reported version, and which
 side to update. For an old daemon it shows `herdr update`, which **Copy Command**
 puts on the clipboard; nothing runs it, since updating may stop that host's
-sessions. For a newer daemon, **Check for Updates** opens the app updater. The
-notice appears once per refused endpoint, retries continue with backoff so an
+sessions. For a newer daemon, the notice asks for a build of this app from its
+latest source and offers only **Dismiss**. The notice appears once per refused endpoint, retries continue with backoff so an
 updated daemon reconnects on its own, and the device list reads "Herdr update
 needed" or "app update needed" until a handshake succeeds.
 **QA > Show herdr non-detected modal** previews the warning without restarting,
@@ -759,10 +731,6 @@ Catalog channels retain typed errors, and rename results share errors with `Arc`
 across cloned UI snapshots. Strings are produced at presentation boundaries, not
 as internal error transport. `anyhow` is reserved for framework boundaries and
 test harnesses, not internal catch-all errors.
-Updater workers and the restart helper use typed `UpdateError` variants, preserving
-sources and recovery context while keeping remote diagnostics out of display text.
-Active regression tests cover typed sources, redaction, and recovery failures;
-the standalone updater harness includes these tests without GPUI dependencies.
 
 ## Notification Sounds
 
@@ -916,8 +884,6 @@ hit testing, resize, and IME geometry continue to use the actual canvas bounds.
 The banner does not query Git/GitHub or intercept keyboard focus. Main-checkout
 builds have no banner. Headless tests cover banner presence/absence, long branch
 labels, PR presence/absence, and body bounds at 360px, 640px, and 1200px widths.
-Build identity and icon selection are described in the
-[release notes](../../scripts/release/README.md#build-identity).
 
 The reference is Zed's `crates/platform_title_bar/src/platform_title_bar.rs` and
 window options in `crates/zed/src/zed.rs`, not a build dependency. On macOS every
@@ -939,6 +905,38 @@ tests check the client-decorated frame (inset, handles kept out of the content,
 tiled edges, and button order and support) with forced decorations. Native QA
 on GNOME Wayland remains required for dragging, resizing, the window menu,
 maximize/restore, and the shadow.
+
+### Build identity
+
+`just bundle` and `contrib/local-agents/install-gui.sh` require Python 3. They
+run `scripts/build-icon.py`, which reads a versioned identity record embedded in
+the supplied executable, never the checkout's Git state. Linked-worktree
+binaries select `assets/icons/herdr-square-worktree-1024.png` or
+`assets/icons/Herdr-worktree.icns` and `Herdr-worktree.car`; other builds use
+the standard assets. No binary is executed. Missing, malformed, or conflicting
+records fail closed; older binaries must be rebuilt.
+
+`herdr-gpui --build-info` prints three newline-terminated `key=value` lines:
+`worktree=0|1`, `branch=...`, and `pr=...`, before any GUI or daemon startup.
+The same record is retained in optimized binaries. This metadata is an identity
+hint, not a signature or proof of provenance.
+
+At build time, Git is anchored at the crate manifest. Only differing canonical
+Git/common directories mark a linked worktree, not branch names, `--dev`, or an
+ordinary checkout with a separate Git directory. Stable builds have an empty
+branch; linked builds use the branch or detached short SHA. Branch names
+containing control characters use the short SHA instead. Missing Git/source
+archives degrade to stable. Cargo watches existing HEAD, current ref, packed
+refs, and checkout pointer files, not the entire ordinary `.git` directory.
+
+`HERDR_BUILD_PR_NUMBER=123 cargo build ...` overrides PR lookup; an explicitly
+empty value disables it. Values must be empty or positive ASCII decimal digits.
+Otherwise attached linked branches get a best-effort
+`gh pr list --head BRANCH --state open --limit 1 --json number --jq '.[0].number'`
+lookup in the manifest repository, with prompts disabled and a two-second
+timeout. Missing gh/auth/network/open PR never prevents a build. There is no
+runtime lookup. Cargo does not poll remote PR changes: force a rebuild or change
+the override when PR metadata changes without a local HEAD/ref change.
 
 ## Terminal Selection And Copy
 
@@ -1760,7 +1758,7 @@ Windows setup) nothing is saved and the window says so.
   stale-while-refresh behavior; see [avatar caching](../../README.md#native-github-sign-in)
   for limits, location, and the startup authentication requirement. Neither cache
   reads nor downloads block rendering; sign-out discards profile refresh results.
-- In-app sidebar menu for settings, keybinds, config reload, update information,
+- In-app sidebar menu for settings, keybinds, config reload, daemon release notes,
   and detach/reconnect. The standalone Settings window combines shared Herdr settings,
   daemon agent integrations, editable native fonts, and general configuration.
   A searchable installed-font picker can set all four families
@@ -2294,14 +2292,9 @@ GPUI native action/menu/keybinding patterns.
 
 ## Windows
 
-Windows is experimental, not a supported platform. CI checks formatting, lints
-every target and feature, and runs workspace tests with default and all features
-on `windows-2025` (x86_64) and `windows-11-arm` (ARM64), including headless UI
-and CLI tests. The release workflow builds and CLI-tests the optimized
-executable natively for each architecture and publishes
-`Herdr-VERSION-x86_64-pc-windows-msvc.zip` and
-`Herdr-VERSION-aarch64-pc-windows-msvc.zip`; native window, rendering, input, and
-live-daemon behavior remain unproven. Local connections use the named pipe the Windows
+Windows is experimental, not a supported platform. `just lint-windows`
+cross-checks it; native window, rendering, input, and live-daemon behavior
+remain unproven. Local connections use the named pipe the Windows
 daemon binds, derived from the same socket path string upstream uses, so
 discovery and framing are the same code as on Unix. Receive deadlines are
 emulated with `PeekNamedPipe`, the one `unsafe` call in the workspace, because a
@@ -2338,10 +2331,6 @@ These features are unavailable on Windows and say so rather than failing quietly
 - **Saved SSH hosts.** The bridge gives the `ssh` child a socket pair as its
   standard streams, which requires `OwnedFd`. Connecting to an SSH endpoint
   reports `SSH endpoints are not supported on this platform`.
-- **In-app updates.** `release::target()` has no Windows updater asset (the
-  release zip is for manual download only), so the updater
-  stays disabled and reports that no standalone updater exists for this platform.
-  Homebrew delegation is macOS-only regardless.
 - **Saved GitHub credentials.** Neither the Keychain nor the private `0600` file
   exists here, so `GH_TOKEN` / `GITHUB_TOKEN` are the only sources of a token.
 - **The avatar disk cache.** It depends on `openat`, `flock`, and POSIX
@@ -2353,8 +2342,8 @@ the daemon survives the GUI and no console window appears.
 
 Cross type-check it from a Mac or Linux machine with `just lint-windows`, which
 targets `x86_64-pc-windows-gnu` because those hosts cannot supply the MSVC C
-toolchain; CI lints the MSVC target on a Windows runner. `just lint-linux` is
-the matching check for Linux, in the Ubuntu 24.04 container CI uses, because a
+toolchain. `just lint-linux` is the matching check for Linux, in an Ubuntu 24.04
+container, because a
 `cfg` gate that is wrong only on Linux is invisible from both macOS and the
 Windows cross-check.
 
@@ -2392,7 +2381,7 @@ mouse-to-clipboard routing. On macOS, `just test-gui /absolute/path/to/herdr`
 also prints CJK text through the isolated daemon, drags forward/backward using
 exact-window native mouse events, checks the OS clipboard, and pastes through
 Cmd-V to verify the UTF-8 bytes returned by the shell. This opt-in test requires
-an active desktop; normal CI compiles it but does not run the native scenario.
+an active desktop; `just ci` compiles it but does not run the native scenario.
 
 Notification policy tests use explicit times for evidence grace, delay changes,
 cross-host arrival order, queue bounds, replacement, promotion lifetimes, and
@@ -2423,7 +2412,7 @@ GPUI 0.3.6's Wayland window retains its platform input handler during deferred
 native cleanup. `ElementInputHandler` holds a strong entity reference, which can
 therefore outlive GPUI's shutdown leak check and cause an `Exited with leaked
 handles` panic in leak-detection builds. This was reproduced both before and
-after [PR #177](https://github.com/penso/herdr-gpui/pull/177#issuecomment-5998314856).
+after the original herdr-gpui project's pull request #177.
 
 On Linux, the client stores a weak reference in each terminal, dialog, and search
 input handler. GPUI picks Wayland or X11 at runtime, so this applies to both

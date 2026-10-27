@@ -89,8 +89,6 @@ mod terminal;
 mod terminal_painter;
 mod theme_picker;
 mod titlebar;
-mod update_panel;
-mod updater;
 mod usage;
 mod window;
 mod window_state;
@@ -109,11 +107,11 @@ pub use error::{Error, Result};
 
 pub(crate) use {
     actions::{
-        CheckForUpdates, Hide, HideOthers, Minimize, PlaySound, Quit, RunCommand, ShowAll,
-        ShowHerdrNotDetected, ShowLogs, ShowUpdatePreview, bind_keys,
+        Hide, HideOthers, Minimize, PlaySound, Quit, RunCommand, ShowAll, ShowHerdrNotDetected,
+        ShowLogs, bind_keys,
     },
     app::open_additional_window,
-    constants::{APP_VERSION, GUI_VERSION, RELEASE_BUILD, TAB_HEIGHT, TAB_WIDTH, WINDOW_TITLE},
+    constants::{GUI_VERSION, RELEASE_BUILD, TAB_HEIGHT, TAB_WIDTH, WINDOW_TITLE},
     menus::menus,
     navigation::{NavigationTarget, OwnedNavigationTarget},
     window::HerdrWindow,

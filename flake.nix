@@ -20,7 +20,7 @@
     let
       inherit (nixpkgs) lib;
       # GPUI's Linux backend is the only one this flake builds; macOS users
-      # install the signed DMG or the Homebrew cask instead.
+      # build from source with cargo.
       systems = [
         "x86_64-linux"
         "aarch64-linux"
@@ -63,7 +63,6 @@
               ./assets
               # The agent skill is compiled into the executable.
               ./skills
-              ./scripts/release/herdr-gpui.desktop
             ];
           };
           cargoLock.lockFile = ./Cargo.lock;
@@ -71,7 +70,7 @@
             "-p"
             "herdr-gpui"
           ];
-          # The optimized CLI suite the release workflow runs; the rest of the
+          # The optimized CLI suite `just test-build` runs; the rest of the
           # workspace suite needs a desktop or a live daemon.
           cargoTestFlags = [
             "-p"
@@ -91,10 +90,9 @@
             pkgs.libxcb
           ]
           ++ runtimeLibraries;
-          # No updater key is embedded, so this build never replaces itself;
           # Nix owns the store path and upgrades come from the flake.
           postInstall = ''
-            install -Dm644 scripts/release/herdr-gpui.desktop \
+            install -Dm644 assets/linux/herdr-gpui.desktop \
               $out/share/applications/herdr-gpui.desktop
             install -Dm644 assets/icons/herdr-icon-square-clean.svg \
               $out/share/icons/hicolor/scalable/apps/herdr-gpui.svg
@@ -104,7 +102,7 @@
           '';
           meta = {
             description = "Native GPUI client for an existing local Herdr daemon";
-            homepage = "https://github.com/penso/herdr-gpui";
+            homepage = "https://github.com/Noosphaira/noosphere-herdr-gpui";
             license = lib.licenses.asl20;
             mainProgram = "herdr-gpui";
             platforms = systems;

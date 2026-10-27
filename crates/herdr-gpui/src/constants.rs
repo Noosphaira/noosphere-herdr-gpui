@@ -1,6 +1,6 @@
 //! Values fixed at build time or by the reference design: the product name the
-//! OS sees, the tab strip's geometry, and the release identity the updater and
-//! any credential store key off.
+//! OS sees, the tab strip's geometry, the version, and the release flag any
+//! credential store keys off.
 
 // Every window carries the product name; the focused space follows it.
 pub(crate) const WINDOW_TITLE: &str = "Herdr";
@@ -13,20 +13,12 @@ pub(crate) const TAB_WIDTH: f32 = 64.;
 // The reference strip is a shallow band: chrome, not a toolbar.
 pub(crate) const TAB_HEIGHT: f32 = 24.;
 
-// Release builds embed the same calendar version (YYYYMMDD.COUNTER) used for the
-// tag, the bundle, and the downloadable artifacts. Local builds are not releases,
-// so they carry no version the updater or an issue report could act on.
-pub(crate) const APP_VERSION: &str = match option_env!("HERDR_RELEASE_VERSION") {
-    Some(version) => version,
-    None => "dev",
-};
-
-// The fork's own version, shown in the status bar and About. It is the
-// workspace version in Cargo.toml, bumped by hand as AGENTS.md describes; the
-// updater keeps `APP_VERSION`, which only upstream's release pipeline sets.
+// The app's version, shown in the status bar and About. It is the workspace
+// version in Cargo.toml, bumped by hand as AGENTS.md describes.
 pub(crate) const GUI_VERSION: &str = env!("CARGO_PKG_VERSION");
 
-// Only the signed release pipeline sets that tag. Local `just run` and worktree
-// builds are unsigned, so features that depend on a stable code identity (such as
-// macOS Keychain access) must treat them as development builds.
+// Only a signed release build sets `HERDR_RELEASE_VERSION`; no script in this
+// repository does. Local `just run` and worktree builds are unsigned, so
+// features that depend on a stable code identity (such as macOS Keychain
+// access) must treat them as development builds.
 pub(crate) const RELEASE_BUILD: bool = option_env!("HERDR_RELEASE_VERSION").is_some();
