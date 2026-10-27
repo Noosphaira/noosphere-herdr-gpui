@@ -1,24 +1,80 @@
 # AGENTS.md
 
-Engineering guidance for agents working in this repository. Read this alongside
-`README.md`, the relevant crate documentation, and the code before making changes.
+<!-- BEGIN UNIVERSAL: maintained in the rules repository and synced. Edit it there. -->
+## Universal rules
 
-## Priorities
+### Instruction files
+- Do not create `CLAUDE.md`, `.claude/CLAUDE.md` or `CLAUDE.local.md` in any directory of this repository. Put instructions in AGENTS.md.
+- Do not edit the Universal rules section (between the BEGIN UNIVERSAL and END UNIVERSAL comments). Project instructions go in the Project section.
+- The Project section adds to the universal rules. A deviation is listed under "Exceptions to universal rules" and names the rule it changes.
 
-- Keep changes small, explicit, and focused on the root cause.
+### Setup
+- Before the first commit in a session, run `git config core.hooksPath`. If the output is not `.githooks`, run `git config core.hooksPath .githooks`.
+
+### Branches
+- `master` holds released code. `develop` is the integration branch and the default branch.
+- Never commit to `develop` or `master`, push to them, or rewrite their history.
+- Create every new branch from the latest `origin/develop`.
+- Branch name: `<category>/<description>`, lowercase, words separated by hyphens. Example: `feature/csv-export`.
+
+| Category | Contents |
+|---|---|
+| `feature` | New functionality, or a change to existing functionality |
+| `bugfix` | Fix for a defect |
+| `documentation` | Changes to documentation only |
+| `refactor` | Code restructuring with no change in behavior |
+| `test` | Changes to tests only |
+| `chore` | Dependency updates, build, CI and tooling configuration |
+
+### Commits
+- Subject line: imperative mood, at most 72 characters. Then a blank line and a body stating what changed and why.
+- A commit with AI-generated changes ends with the trailer `Assisted-by: <agent>:<model>`. Example: `Assisted-by: claude-code:claude-opus-5-5`.
+- No `Co-authored-by` or `Signed-off-by` trailer names an AI agent.
+- Never run git with `--no-verify`.
+- After a pull request is opened, do not rewrite the branch history. To update the branch, merge `origin/develop` into it.
+
+### Work cycle
+1. Create a branch from `develop`, implement the change, verify it.
+2. Work is ready for user review when a person can use the change in its interface: a changed screen in the frontend, a command that runs in the terminal, an endpoint that responds. Code that compiles does not meet this.
+3. Work with an open decision or blocker is not ready for user review. Present each decision and blocker to the user and wait for the answer.
+4. When the work is ready: commit, run the change locally (Project > Run locally) and present it to the user. Do not push and do not open a pull request.
+5. After the user approves: push the branch, open a pull request to `develop`, and follow the `pr-review-loop` skill until the pull request is merged.
+6. After the merge: open or update the pull request from `develop` to `master`. Merging into `master` requires the user's approval on GitHub. Merge into `master` only when the user asks.
+
+The `git-workflow` skill contains the commands for each step.
+
+### Verification
+- Before user review, run the build, tests and linters listed in Project > Build, test and lint. The change adds no new warnings.
+- Reproduce a bug before fixing it. Where the project has tests, add a test that fails without the fix.
+- State what could not be built, run or tested.
+
+### Change size
+- Stop and ask the user before a change exceeds 1,000 added plus deleted lines, excluding lockfiles.
+- A pull request to `develop` over this limit fails the `pr-size` check unless it has the `size-exception` label. Add the label only after the user approves the size.
+<!-- END UNIVERSAL -->
+
+## Project
+
+### Overview
+Herdr GPUI is a native Rust/GPUI client for macOS, Linux and Windows. It connects to an existing local Herdr daemon. It is not a terminal emulator, server or TUI wrapper. Herdr owns terminal processes and session state. Closing or detaching the GUI leaves the daemon and its terminals running.
+
+Read this file with `README.md`, the relevant crate documentation and the code before making changes.
+
+#### Fork
+- This checkout is the user's fork, `Noosphaira/noosphere-herdr-gpui`. All work happens there: branches, pushes, pull requests and every `gh` command.
+- Ignore the upstream `penso/herdr-gpui` unless the user asks for it in the current request. No pull requests, issues, comments or pushes there. No fetching, syncing, merging or rebasing from it.
+- Pass `--repo Noosphaira/noosphere-herdr-gpui` to `gh`. In a fork, `gh` may otherwise default to the parent.
+- The workflows in `.github/workflows/` run only in upstream. They do not run in this fork.
+
+#### Priorities
+- Keep changes small, explicit and focused on the root cause.
 - Preserve user and other agents' changes. Never revert unrelated edits.
 - Prefer existing standard traits and generics over unnecessarily concrete APIs.
-- Protect protocol compatibility, bounded resource use, and UI responsiveness.
+- Protect protocol compatibility, bounded resource use and UI responsiveness.
 - Add regression tests for changed behavior and report what was actually verified.
-- Never modify or patch Herdr itself. It is owned by an unrelated external team;
-  sibling Herdr checkouts are read-only references. Propose an upstream PR only
-  when genuinely justified, never make incidental upstream edits for this client.
+- Never modify or patch Herdr itself. An unrelated external team owns it. Sibling Herdr checkouts are read-only references. Propose an upstream pull request only when genuinely justified. Never make incidental upstream edits for this client.
 
-## Architecture
-
-Herdr GPUI is a native client of an existing local Herdr daemon, not a terminal
-emulator, server, or TUI wrapper. Herdr owns terminal processes and session state.
-Closing or detaching the GUI must leave the daemon and its terminals running.
+#### Architecture
 
 | Location | Responsibility |
 | --- | --- |
@@ -27,166 +83,140 @@ Closing or detaching the GUI must leave the daemon and its terminals running.
 | `crates/herdr-gpui` | Native UI, connection bridge, presentation state, semantic input, geometry, and painting |
 | `crates/test-support/sandbox.rs` | Shared isolated process setup for opt-in integration tests; not a production crate |
 
-- Keep dependency direction from UI to client to protocol. Protocol/client code must not depend on GPUI.
+- Keep dependency direction from UI to client to protocol. Protocol and client code must not depend on GPUI.
 - Keep session transitions separate from socket scheduling, and connection ownership separate from window rendering.
-- Reuse `ConnectionBridge`, domain targets, geometry helpers, and the test sandbox rather than duplicating their policies.
-- Organize files by responsibility, not by length; there is no line limit. A
-  file holds one concern you can name in a sentence, and its module doc comment
-  says what it owns. Split when a file holds two: state and its rendering,
-  parsing and I/O, one feature's code or tests beside an unrelated feature's.
-  Length is a reason to look, not to cut: a long file with one cohesive job (a
-  protocol table, a painter, a provider list) stays whole, and a short file
-  that mixes concerns gets split.
-- To split, move a whole responsibility into a child module (`foo.rs` plus
-  `foo/bar.rs`), leave the parent as wiring and re-exports, and keep moved
-  items private or `pub(super)`. Make the split its own `refactor:` commit
-  ahead of the change that needs it, and do not reshuffle unrelated files.
-- Keep APIs narrow. Use private items by default and `pub(super)` or `pub(crate)` only where needed; do not expose every field merely to ease extraction.
+- Reuse `ConnectionBridge`, domain targets, geometry helpers and the test sandbox. Do not duplicate their policies.
+- Organize files by responsibility, not by length. There is no line limit. A file holds one concern you can name in a sentence, and its module doc comment says what it owns. Split when a file holds two: state and its rendering, parsing and I/O, one feature's code or tests beside an unrelated feature's. Length is a reason to look, not to cut. A long file with one cohesive job (a protocol table, a painter, a provider list) stays whole. A short file that mixes concerns gets split.
+- To split, move a whole responsibility into a child module (`foo.rs` plus `foo/bar.rs`). Leave the parent as wiring and re-exports. Keep moved items private or `pub(super)`. Make the split its own commit ahead of the change that needs it. Do not reshuffle unrelated files.
+- Keep APIs narrow. Use private items by default and `pub(super)` or `pub(crate)` only where needed. Do not expose every field merely to ease extraction.
 - Define shared types once in the lowest appropriate layer and re-export them. Do not create mirror enums or convert between them through strings.
-- Do not add a crate, runtime, service container, or speculative transport abstraction without a concrete need. Sibling checkouts are references, not build dependencies.
+- Do not add a crate, runtime, service container or speculative transport abstraction without a concrete need. Sibling checkouts are references, not build dependencies.
 
-## Rust Conventions
-
-- Require only the capabilities an operation uses. Prefer existing traits such as `Read`, `Write`, `IntoIterator`, `AsRef<Path>`, and `AsRef<OsStr>` over specific streams, collections, or owned paths.
-- Use slices, `&str`, and `&Path` when borrowing is sufficient. Keep owned data where it must cross a thread boundary or outlive its caller.
-- Prefer `impl Trait` or named generics for static dispatch. Use `dyn Trait` for actual runtime heterogeneity/type erasure, not by default.
-- Use `FnOnce`, `FnMut`, or `Fn` for injectable behavior. Do not invent a callback or clock trait when a closure or explicit time value suffices.
-- Do not introduce custom traits merely to wrap one struct. A new trait needs a concrete behavioral contract and a real implementation/substitution need that existing traits cannot express.
-- Use enums for closed alternatives such as navigation targets, pane/popup input destinations, connection phases, and launch modes. Avoid string dispatch and boolean-plus-ID pairs internally.
-- Parse strings at boundaries, then match on domain types. Prefer `From`, `TryFrom`, `Into`, and `TryInto` for conversions.
-- Prefer typed request/result structures when shapes are known. Preserve genuinely open-ended protocol envelopes rather than forcing a speculative schema.
-- Derive standard traits such as `Default`, `PartialEq`, and `Eq` where their semantics are valid. Compare complete values when deduplicating operations.
-- Every crate must expose its own root `Error` and `Result<T>` (`pub use error::{Error, Result}`), with errors defined using `thiserror`. Use meaningful typed variants for internal failures and match on variants, never error text.
-- Use `anyhow::Result` and context at application/reporting and test-harness boundaries, not as a replacement for typed internal errors. Keep dependency versions in workspace dependencies.
-- Never use `String` or `&str` as an error type, including `Result<(), String>`, worker-channel results, and intermediate operation state. Strings are allowed as diagnostic payloads, unchanged wire-protocol fields, and final UI display text, not as catch-all internal error wrappers.
-- Propagate errors with `?`; preserve original causes with `#[from]`/`#[source]` and retain structured operation/path context until the display boundary. Do not flatten sources with `to_string()` or `format!()` during propagation. Keep `io::Result` where an actual I/O trait or connector contract requires it, preserving typed sources when adapting errors.
-- Test error variants and source chains as well as user-facing diagnostics. Preserve redaction, bounded remote diagnostics, retry/cancellation classification, and protocol compatibility when changing error handling.
-- No `unwrap()` or `expect()` in production. Test-only allowances must be scoped to test code.
-- Prefer safe Rust. Do not introduce `unsafe` unless there is no practical safe alternative; investigate standard-library APIs and maintained safe wrappers first. Any unavoidable exception must be tightly scoped and document both why safe alternatives are insufficient and the safety invariants.
-- Prefer guard clauses and readable iterators. Avoid clones, allocations, helper layers, and generic parameters that provide no benefit.
-- Comments should explain invariants, ownership, or non-obvious decisions, not narrate assignments.
-
-## GPUI Rules
-
-- Treat app, window, and entity contexts as UI-thread execution. A foreground `spawn` future does not make blocking work safe.
-- Never perform blocking socket/disk I/O, process waits, sleeps, or expensive background computation on the UI thread. Use the existing worker threads or GPUI background executor, then apply results through the appropriate context update.
-- Keep render and input paths thin. Render from prepared state and bounded caches; do not query the daemon, scan files, or launch processes while rendering.
-- Preserve continuously drained ordered events and the coalesced latest-state mailbox. Do not replace them with an unbounded UI event queue.
-- Route connection/startup failures through the authoritative inbox. Reconnect and detach must isolate old inboxes so delayed events and paint acknowledgements cannot affect the new connection.
-- Derive connection text/indicators from `ConnectionStatus`. Old local operation errors must not hide a disconnection reason.
-- Queue success is not daemon acknowledgement. Keep names such as `last_queued_options` honest and include cell pixel metrics in resize comparisons.
-- Use the same geometry for painting, hit testing, and IME placement. Popup input and composition bounds must target the popup, not the underlying pane.
-- Keep glyph visibility separate from decorations: spaces and wide-character continuation cells may still need underline/strikethrough painting.
-- Preserve menu input isolation, focus behavior, Unicode composition, and semantic input routing. Do not synthesize terminal keys for operations with endpoint API methods.
-- Activity indicators come from the daemon's snapshot, not guessed terminal output or a client-local seen ledger. Every client shows the same dot; do not reintroduce per-client acknowledgement without asking.
-
-## Protocol And Safety
-
-- Vendored bincode field and enum variant order is a compatibility contract. Do not reorder declarations as cleanup. Preserve attribution in `crates/herdr-protocol/NOTICE.md`.
-- Keep frame/response/geometry bounds, strict decoding, and atomic patch validation. Test malformed inputs and limits, not only valid fixtures.
-- Never mix snapshot metadata and surface cells across boot IDs or projection revisions. Preserve future-surface buffering and stale-boot rejection.
-- Preserve the single in-flight API request, bounded command/event queues, FIFO ordering, bounded write batches, and request correlation.
-- Partial frame prefixes/payloads must survive read timeouts. Finish an inbound partial frame before dispatching commands against potentially stale state.
-- Cancellation must not flush queued work, replay commands, or join a worker on the UI thread. Do not add automatic reconnect/replay as an incidental refactor.
-- Crossbeam receiver clones compete for events; they are not broadcast subscribers.
-- Treat terminal content and daemon messages as untrusted data. Do not execute terminal escapes, follow graphics file paths, or run displayed update commands automatically. The one exception is the daemon's OSC 52 `ServerMessage::Clipboard`: decode it and put only its bounded UTF-8 text on the pasteboard, never arbitrary bytes, files, or images.
-- The normal app never installs, starts, stops, or upgrades a personal daemon. Explicit sockets refer to the binary client socket, not the JSON API socket.
-- Never commit secrets, credentials, private terminal output, or machine-local configuration.
-
-## Dependencies And Features
-
-- Put dependency versions in root `[workspace.dependencies]`; member crates inherit with `{ workspace = true }`.
-- Use the pinned `rust-toolchain.toml` and GPUI version. Do not copy toolchain, feature, or release assumptions from Moltis/Arbor.
-- Keep workspace lint inheritance and fix warnings rather than widening allowances.
-- Keep `integration-test` opt-in. Gate imports, modules, and call sites consistently, and verify both default and all-feature builds.
-- Do not introduce Tokio or another runtime to wrap the existing blocking socket worker.
-- Avoid unrelated lockfile upgrades. Use `--locked` for reproducible verification.
-
-## Changelog
-
-Users learn what changed from the GitHub release body, which is generated from
-git history by `git-cliff` (`cliff.toml`) rather than written by hand. The
-release workflow's `changelog` job runs `scripts/release/generate-changelog.sh`
-and `publish` passes its `RELEASE_NOTES.md` to `gh release create --notes-file`.
-`CHANGELOG.md` is generated for each release and is not tracked in git.
-
-- Commit subjects are the changelog entries, verbatim apart from a capitalized
-  first letter. Write the subject line for a user reading a release page, and
-  put rationale in the body; only the first line is published.
-- The type chooses the section: `feat` becomes Added, `fix` becomes Fixed,
-  `perf`/`refactor`/`revert` become Changed, `docs` becomes Documentation, and a
-  `(security)` scope becomes Security. A scope prints as a `[scope]` prefix, and
-  anything non-conventional falls into Changed.
-- `chore`, `ci`, `build`, `style`, `test`, and merge commits never reach users,
-  so nothing user-visible may ship under those types. A breaking change is the
-  exception: `type!:` or a `BREAKING CHANGE:` footer is always published, under
-  Changed and prefixed `**BREAKING:**`, whatever its type.
-- Previewing the generated changelog before a release is covered by the
-  `release` skill.
-- These rules are enforced, not advisory. `just hooks` installs a `commit-msg`
-  hook that refuses a bad subject before the commit exists, and CI's `commits`
-  job checks every commit in a pull request; it is part of the `Format, lint,
-  and test` gate. Run `just hooks` once per clone, and `just check-commits`
-  to check a branch by hand. Fix a rejected subject with `git commit --amend`
-  rather than `--no-verify`.
-
-## Versioning
-
-- The fork's version is `version` under `[workspace.package]` in the root
-  `Cargo.toml`, in semver. The app shows it as `GUI x.y.z` at the right of the
-  status bar and in About, and logs it at startup and in log exports. The
-  Herdr version beside it comes from the connected daemon's welcome; never
-  hardcode or guess it.
-- Bump it in the pull request that makes the change, once per pull request,
-  by its most significant commit type (see Changelog):
-  - `feat`, or any breaking change: minor while below 1.0 (0.2.0 -> 0.3.0).
-  - `fix`, `perf`, `refactor`, or `revert`: patch (0.2.0 -> 0.2.1).
-  - `chore`, `ci`, `build`, `style`, `test`, or `docs` alone: no bump.
-- Bump from the version on `main`, not from another open pull request. When
-  another bump lands first, rebase and bump again from the new `main`.
-- Commit `Cargo.toml` and `Cargo.lock` together. A plain `cargo build` updates
-  the lockfile; its diff must touch only the three workspace crates' versions.
-  Put the bump in the change's own commit, not a separate `chore` commit.
-- State the bump in the PR summary, for example `Version: 0.2.0 -> 0.2.1`.
-- Leave `APP_VERSION` and `HERDR_RELEASE_VERSION` alone: they are upstream's
-  calendar release identity, which the updater and release-only behavior key
-  off. Setting `HERDR_RELEASE_VERSION` in a local build turns those on.
-
-## Verification
-
-Prefer the existing `just` recipes. Run focused tests while iterating, then the
-workspace gates for Rust changes before handoff or a requested commit:
+### Build, test and lint
+Use the `just` recipes. Run focused tests while iterating. Before user review of a Rust change, run:
 
 ```sh
 just format
 just ci
 ```
 
-- For linking, startup, or packaging changes, also use `just test-build` to build the release executable and exercise its CLI without a desktop.
-- The `windows` CI job checks formatting, lints every target and feature, and
-  runs workspace tests with default and all features, including headless UI and
-  CLI tests. Optimized Windows builds and CLI tests run in the release workflow;
-  native GUI behavior is unproven. Keep the `cfg(unix)`/`cfg(windows)`
-  split honest and say plainly what a platform cannot do instead of stubbing
-  behavior that appears to work.
-- A `cfg` gate is only proven on the platform it names. Before handing off a
-  change that touches one, run `just lint-linux` and `just lint-windows` as well
-  as `just ci`: a macOS run cannot see a Linux-only gate, and neither can the
-  Windows cross-check.
-- Documentation-only changes need command/path/link review and `git diff --check`; do not claim a code test run that did not happen.
-- Add deterministic tests for invariants: ordering, cancellation, fragmentation, revision fencing, error paths, geometry, and cleanup. Prefer explicit coordination and bounded waits over timing guesses.
-- Test pure session/CLI/geometry logic without a socket or window where possible. Exercise public behavior with mock peers and headless GPUI tests where integration matters.
-- Keep test bodies out of production files, which only declare `#[cfg(test)] mod tests;`.
-  Put tests for a new feature in a new topic file under the module's `tests/` directory
-  (for example `keymap/tests/pane_keys.rs`, starting with `use super::*;`) rather than
-  inserting them into an existing large test module, and keep shared fixtures in the
-  parent `tests.rs`. Parallel PRs then edit different files instead of conflicting.
-- Fix flaky tests rather than hiding them with retries or new ignores. Existing live/native tests are ignored because they require explicit external resources.
-- For visual changes, verify the actual native UI when a desktop is available, including narrow layouts, long labels, focus, popup/IME behavior, and clipping. Headless layout tests do not prove native glyph or OS input correctness.
-- Measure interactive performance in release mode (`just run`), not debug mode. Preserve bounded glyph caching and deterministic paint budgets; native timing budgets are machine-dependent.
-- Keep CLI parsing pure and based on OS strings so socket paths need not be UTF-8. Invalid options and help must exit before starting GPUI.
+- `just ci` runs `format-check`, `lint` (clippy, all targets and features, `-D warnings`) and `test` (default and all features).
+- For linking, startup or packaging changes, also run `just test-build`. It builds the release executable and exercises its CLI without a desktop.
+- For a change that touches a `cfg` gate, also run `just lint-linux` and `just lint-windows`. A `cfg` gate is only proven on the platform it names.
+- For changes under `scripts/release`, run `just release-check`, or at least `python3 -m unittest discover -s scripts/release/tests`.
+- Documentation-only changes need command, path and link review and `git diff --check`.
 
-### Opt-In Tests
+### Run locally
+- `just run` starts the optimized release build with the QA menu. `just run-debug` starts a debug build and is slower with a dense terminal on screen.
+- The app needs an installed Herdr daemon. It starts an already-installed local `herdr server` when the target session is absent. It never installs or upgrades a daemon.
+- On macOS both recipes build a local bundle identified as `so.pen.herdr-gpui.dev`.
+- Measure interactive performance with `just run`, not a debug build.
+
+### Repository layout
+- `crates/`: the workspace crates (see Overview > Architecture).
+- `assets/`: icons and platform bundle files.
+- `scripts/`: Linux dependencies, lint containers, icons, updater and release tooling. `scripts/release/` holds the release scripts and their Python tests.
+- `docs/`: user and platform documentation.
+- `.githooks/`: the git hooks set by `core.hooksPath`.
+- `.claude/skills/`: agent skills (`git-workflow`, `pr-review-loop`, `release`, `gpui-mockup`).
+- `cliff.toml`: git-cliff configuration for release notes.
+
+### Conventions
+
+#### Rust conventions
+- Require only the capabilities an operation uses. Prefer existing traits such as `Read`, `Write`, `IntoIterator`, `AsRef<Path>` and `AsRef<OsStr>` over specific streams, collections or owned paths.
+- Use slices, `&str` and `&Path` when borrowing is sufficient. Keep owned data where it must cross a thread boundary or outlive its caller.
+- Prefer `impl Trait` or named generics for static dispatch. Use `dyn Trait` for actual runtime heterogeneity or type erasure, not by default.
+- Use `FnOnce`, `FnMut` or `Fn` for injectable behavior. Do not invent a callback or clock trait when a closure or explicit time value suffices.
+- Do not introduce custom traits merely to wrap one struct. A new trait needs a concrete behavioral contract and a real implementation or substitution need that existing traits cannot express.
+- Use enums for closed alternatives such as navigation targets, pane and popup input destinations, connection phases and launch modes. Avoid string dispatch and boolean-plus-ID pairs internally.
+- Parse strings at boundaries, then match on domain types. Prefer `From`, `TryFrom`, `Into` and `TryInto` for conversions.
+- Prefer typed request and result structures when shapes are known. Preserve genuinely open-ended protocol envelopes rather than forcing a speculative schema.
+- Derive standard traits such as `Default`, `PartialEq` and `Eq` where their semantics are valid. Compare complete values when deduplicating operations.
+- Every crate exposes its own root `Error` and `Result<T>` (`pub use error::{Error, Result}`), with errors defined using `thiserror`. Use meaningful typed variants for internal failures and match on variants, never on error text.
+- Use `anyhow::Result` and context at application, reporting and test-harness boundaries, not as a replacement for typed internal errors. Keep dependency versions in workspace dependencies.
+- Never use `String` or `&str` as an error type, including `Result<(), String>`, worker-channel results and intermediate operation state. Strings are allowed as diagnostic payloads, unchanged wire-protocol fields and final UI display text, not as catch-all internal error wrappers.
+- Propagate errors with `?`. Preserve original causes with `#[from]` or `#[source]` and keep structured operation and path context until the display boundary. Do not flatten sources with `to_string()` or `format!()` during propagation. Keep `io::Result` where an actual I/O trait or connector contract requires it, and preserve typed sources when adapting errors.
+- Test error variants and source chains as well as user-facing diagnostics. Preserve redaction, bounded remote diagnostics, retry and cancellation classification, and protocol compatibility when changing error handling.
+- No `unwrap()` or `expect()` in production. Scope test-only allowances to test code.
+- Prefer safe Rust. Do not introduce `unsafe` unless there is no practical safe alternative. Investigate standard-library APIs and maintained safe wrappers first. Any unavoidable exception is tightly scoped and documents why safe alternatives are insufficient and what the safety invariants are.
+- Prefer guard clauses and readable iterators. Avoid clones, allocations, helper layers and generic parameters that provide no benefit.
+- Comments explain invariants, ownership or non-obvious decisions. They do not narrate assignments.
+
+#### GPUI rules
+- Treat app, window and entity contexts as UI-thread execution. A foreground `spawn` future does not make blocking work safe.
+- Never perform blocking socket or disk I/O, process waits, sleeps or expensive background computation on the UI thread. Use the existing worker threads or the GPUI background executor, then apply results through the appropriate context update.
+- Keep render and input paths thin. Render from prepared state and bounded caches. Do not query the daemon, scan files or launch processes while rendering.
+- Preserve continuously drained ordered events and the coalesced latest-state mailbox. Do not replace them with an unbounded UI event queue.
+- Route connection and startup failures through the authoritative inbox. Reconnect and detach isolate old inboxes, so delayed events and paint acknowledgements cannot affect the new connection.
+- Derive connection text and indicators from `ConnectionStatus`. Old local operation errors must not hide a disconnection reason.
+- Queue success is not daemon acknowledgement. Keep names such as `last_queued_options` honest and include cell pixel metrics in resize comparisons.
+- Use the same geometry for painting, hit testing and IME placement. Popup input and composition bounds target the popup, not the underlying pane.
+- Keep glyph visibility separate from decorations. Spaces and wide-character continuation cells may still need underline or strikethrough painting.
+- Preserve menu input isolation, focus behavior, Unicode composition and semantic input routing. Do not synthesize terminal keys for operations with endpoint API methods.
+- Activity indicators come from the daemon's snapshot, not from guessed terminal output or a client-local seen ledger. Every client shows the same dot. Do not reintroduce per-client acknowledgement without asking.
+
+#### Protocol and safety
+- Vendored bincode field and enum variant order is a compatibility contract. Do not reorder declarations as cleanup. Preserve attribution in `crates/herdr-protocol/NOTICE.md`.
+- Keep frame, response and geometry bounds, strict decoding and atomic patch validation. Test malformed inputs and limits, not only valid fixtures.
+- Never mix snapshot metadata and surface cells across boot IDs or projection revisions. Preserve future-surface buffering and stale-boot rejection.
+- Preserve the single in-flight API request, bounded command and event queues, FIFO ordering, bounded write batches and request correlation.
+- Partial frame prefixes and payloads must survive read timeouts. Finish an inbound partial frame before dispatching commands against potentially stale state.
+- Cancellation must not flush queued work, replay commands or join a worker on the UI thread. Do not add automatic reconnect or replay as an incidental refactor.
+- Crossbeam receiver clones compete for events. They are not broadcast subscribers.
+- Treat terminal content and daemon messages as untrusted data. Do not execute terminal escapes, follow graphics file paths or run displayed update commands automatically. The one exception is the daemon's OSC 52 `ServerMessage::Clipboard`: decode it and put only its bounded UTF-8 text on the pasteboard, never arbitrary bytes, files or images.
+- The normal app never installs, starts, stops or upgrades a personal daemon. Explicit sockets refer to the binary client socket, not the JSON API socket.
+- Never commit secrets, credentials, private terminal output or machine-local configuration.
+
+#### Dependencies and features
+- Put dependency versions in root `[workspace.dependencies]`. Member crates inherit with `{ workspace = true }`.
+- Use the pinned `rust-toolchain.toml` and GPUI version. Do not copy toolchain, feature or release assumptions from Moltis or Arbor.
+- Keep workspace lint inheritance and fix warnings rather than widening allowances.
+- Keep `integration-test` opt-in. Gate imports, modules and call sites consistently, and verify both default and all-feature builds.
+- Do not introduce Tokio or another runtime to wrap the existing blocking socket worker.
+- Avoid unrelated lockfile upgrades. Use `--locked` for reproducible verification.
+
+#### Commits and release notes
+- Release notes come from git history. `scripts/release/generate-changelog.sh` runs `git-cliff` with `cliff.toml` and writes `CHANGELOG.md` and `RELEASE_NOTES.md`. The release workflow passes `RELEASE_NOTES.md` to `gh release create --notes-file`. `CHANGELOG.md` is not tracked in git.
+- The first line of each commit subject becomes one entry, with its first letter capitalized. Merge commits are skipped. Write the subject for a user reading a release page. Put the rationale in the body.
+- `cliff.toml` groups entries by conventional-commit prefix. Plain imperative subjects match none of those prefixes and fall into Changed.
+- Preview the unreleased entries with `just changelog-unreleased`. The `release` skill covers previewing a release.
+- For nontrivial work, the commit body explains the problem, the chosen approach and important constraints.
+- Before committing, inspect status, diff and recent history. Stage only intended files and check for secrets. Do not bypass signing when it fails.
+- Do not amend, force-push, discard changes or clean up other worktrees without explicit authorization.
+
+#### Versioning
+- The fork's version is `version` under `[workspace.package]` in the root `Cargo.toml`, in semver. The app shows it as `GUI x.y.z` at the right of the status bar and in About, and logs it at startup and in log exports. The Herdr version beside it comes from the connected daemon's welcome. Never hardcode or guess it.
+- Bump it in the pull request that makes the change, once per pull request, by the most significant kind of change:
+  - A new feature or a breaking change: minor while below 1.0 (0.2.0 -> 0.3.0).
+  - A bug fix, performance change, refactor or revert: patch (0.2.0 -> 0.2.1).
+  - Documentation, tests, CI, build or tooling only: no bump.
+- Bump from the version on `develop`, not from another open pull request. When another bump lands first, merge `origin/develop` and bump again from its version.
+- Commit `Cargo.toml` and `Cargo.lock` together. A plain `cargo build` updates the lockfile. Its diff touches only the three workspace crates' versions. Put the bump in the change's own commit, not a separate commit.
+- State the bump in the pull request summary, for example `Version: 0.2.0 -> 0.2.1`.
+- Leave `APP_VERSION` and `HERDR_RELEASE_VERSION` alone. They are upstream's calendar release identity, which the updater and release-only behavior key off. Setting `HERDR_RELEASE_VERSION` in a local build turns those on.
+
+#### Pull requests
+These rules add to the pull request template. They do not replace its sections.
+- Before creating a pull request, review every included commit and the full diff from `develop`. Include exact validation commands and their results, and the remaining manual or native QA.
+- Include screenshots in any pull request that changes something visible: before and after images of the real native window, showing the changed area. Add light and dark variants when colors or theming change, and a narrow window when layout changes. If no desktop was available to capture them, say so instead of leaving the section empty.
+- Include a QA checklist in the verification part of the description. List each check as a checkbox. Tick the checks that actually ran (automated tests, gates, native checks you performed) with their result. Leave unticked the manual QA a reviewer still has to do, phrased as concrete steps. Never tick a box for a check that did not run.
+- Keep user-facing docs and public API examples synchronized with behavior changes. Do not copy another repository's release, issue-tracker or mandatory-push workflow into this one.
+- Finish with the outcome, the tests actually run, known limitations and deferred work. Never claim unrun checks passed.
+
+#### Verification details
+- The upstream `windows` CI job checks formatting, lints every target and feature, and runs workspace tests with default and all features, including headless UI and CLI tests. Optimized Windows builds and CLI tests run in the release workflow. Native GUI behavior on Windows is unproven. Keep the `cfg(unix)`/`cfg(windows)` split honest. Say plainly what a platform cannot do instead of stubbing behavior that appears to work.
+- A macOS run cannot see a Linux-only gate, and neither can the Windows cross-check. Run `just lint-linux`, `just lint-windows` and `just ci` for a change that touches a `cfg` gate.
+- Do not claim a code test run that did not happen.
+- Add deterministic tests for invariants: ordering, cancellation, fragmentation, revision fencing, error paths, geometry and cleanup. Prefer explicit coordination and bounded waits over timing guesses.
+- Test pure session, CLI and geometry logic without a socket or window where possible. Exercise public behavior with mock peers and headless GPUI tests where integration matters.
+- Keep test bodies out of production files. Production files only declare `#[cfg(test)] mod tests;`. Put tests for a new feature in a new topic file under the module's `tests/` directory (for example `keymap/tests/pane_keys.rs`, starting with `use super::*;`). Do not insert them into an existing large test module. Keep shared fixtures in the parent `tests.rs`. Parallel pull requests then edit different files instead of conflicting.
+- Fix flaky tests rather than hiding them with retries or new ignores. Existing live and native tests are ignored because they require explicit external resources.
+- For visual changes, verify the actual native UI when a desktop is available, including narrow layouts, long labels, focus, popup and IME behavior, and clipping. Headless layout tests do not prove native glyph or OS input correctness.
+- Measure interactive performance in release mode (`just run`). Preserve bounded glyph caching and deterministic paint budgets. Native timing budgets are machine-dependent.
+- Keep CLI parsing pure and based on OS strings, so socket paths need not be UTF-8. Invalid options and help exit before starting GPUI.
+
+#### Opt-in tests
 
 ```sh
 just test-live /absolute/path/to/herdr
@@ -195,40 +225,11 @@ just test-sidebar
 just test-perf
 ```
 
-- Live tests require an explicitly selected `HERDR_TEST_BINARY`; never fall back to discovering a user's daemon.
-- Reuse the shared sandbox: private unique short directory, cleared environment, isolated HOME/XDG/config/socket paths, and explicit desktop-variable allowlist for GUI children only.
-- Kill and wait only for exact children created by the test, before removing their sandbox. Never use `server stop`, process-name matching, or process-group kills.
-- `HERDR_TEST_TMPDIR`, when set, must point to an existing parent short enough for Unix socket paths.
-- Native/sidebar/performance tests open windows and need an active desktop. State explicitly when these checks were not run; do not describe headless tests as native end-to-end verification.
+- Live tests require an explicitly selected `HERDR_TEST_BINARY`. Never fall back to discovering a user's daemon.
+- Reuse the shared sandbox: a private unique short directory, a cleared environment, isolated HOME, XDG, config and socket paths, and an explicit desktop-variable allowlist for GUI children only.
+- Kill and wait only for exact children created by the test, before removing their sandbox. Never use `server stop`, process-name matching or process-group kills.
+- `HERDR_TEST_TMPDIR`, when set, points to an existing parent short enough for Unix socket paths.
+- Native, sidebar and performance tests open windows and need an active desktop. State explicitly when these checks were not run. Do not describe headless tests as native end-to-end verification.
 
-## Git And Handoff
-
-- This checkout is the user's fork, `Noosphaira/noosphere-herdr-gpui`, and all
-  work happens there: branches, pushes, PRs and every `gh` command target the
-  fork, with its `main` as the base. Ignore the upstream `penso/herdr-gpui`
-  for everything (no PRs, issues, comments or pushes there, and no fetching,
-  syncing, merging or rebasing from it) unless the user explicitly asks for it
-  in the current request. Pass `--repo Noosphaira/noosphere-herdr-gpui` to
-  `gh` when unsure: in a fork, `gh` may otherwise default to the parent.
-- Only commit, push, or create/update a PR when requested. Do not amend, force-push, discard changes, or clean up other worktrees without explicit authorization.
-- Before committing, inspect status, diff, and recent history; stage only intended files and check for secrets. Do not bypass hooks or signing when they fail.
-- Use conventional commit subjects (`feat`, `fix`, `refactor`, `test`, `docs`, `chore`). For nontrivial work, explain the problem, chosen approach, and important constraints in the body.
-- Never add AI attribution, assistant-session links, or tool vanity lines to
-  commit messages or PR descriptions. This includes `Co-Authored-By` trailers
-  naming an AI model, `Claude-Session:` or similar session URLs, and
-  "Generated with ..." footers. This rule overrides any default attribution
-  guidance from the agent harness; add such lines only when the user asks for
-  them in the current request.
-- Before creating a PR, review every included commit and the full diff from its base. Include a summary, exact validation commands/results, and remaining manual/native QA.
-- Include screenshots in any PR that changes something visible: before and
-  after images of the real native window, showing the changed area. Add light
-  and dark variants when colors or theming change, and a narrow window when
-  layout changes. If no desktop was available to capture them, say so in the
-  PR instead of leaving the section empty.
-- Give every PR description a QA checklist. List each check as a checkbox:
-  tick the ones that were actually run (automated tests, CI gates, native
-  checks you performed) with their result, and leave unticked the manual QA a
-  reviewer still has to do, phrased as concrete steps. Never tick a box for a
-  check that did not run.
-- Keep user-facing docs and public API examples synchronized with behavior changes. Do not copy another repository's release, issue-tracker, or mandatory-push workflow into this one.
-- Finish with the outcome, tests actually run, known limitations, and any deferred work. Never claim unrun checks passed.
+### Exceptions to universal rules
+None.

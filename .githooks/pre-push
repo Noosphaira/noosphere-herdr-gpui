@@ -1,0 +1,28 @@
+#!/usr/bin/env bash
+# Rejects pushes to and deletions of develop and master, and pushes of branches with invalid names.
+set -eo pipefail
+# shellcheck source=lib/common.sh
+. "$(dirname "$0")/lib/common.sh"
+
+input="$(cat)"
+
+while read -r _ local_sha remote_ref _; do
+  [ -n "$remote_ref" ] || continue
+  case "$remote_ref" in
+    refs/heads/*) branch="${remote_ref#refs/heads/}" ;;
+    *) continue ;;
+  esac
+
+  if is_protected_branch "$branch"; then
+    hook_fail "pre-push: pushing to or deleting '$branch' is not allowed." \
+      "Changes reach '$branch' through pull requests."
+  fi
+
+  # A local SHA of zeros is a branch deletion. Deleting a non-protected branch is allowed.
+  if ! [[ "$local_sha" =~ ^0+$ ]] && ! [[ "$branch" =~ $BRANCH_PATTERN ]]; then
+    print_branch_rule
+    hook_fail "pre-push: branch name '$branch' does not match the format."
+  fi
+done <<< "$input"
+
+run_local_hook pre-push "$@" <<< "$input"

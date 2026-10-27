@@ -44,8 +44,8 @@ sort_commits = "oldest"
 
 tag_pattern = "v[0-9]{8}\\.[0-9]+"
 
-# First match wins. Every commit in this repository is conventional (AGENTS.md
-# requires it), so these match types rather than guessing at prose. The order
+# First match wins. Older commits are conventional; commits under the current
+# AGENTS.md rules use plain imperative subjects and fall into Changed. The order
 # matters: a breaking change is user-visible whatever its type, so it must find
 # a group before the rules that hide chores and housekeeping.
 commit_parsers = [

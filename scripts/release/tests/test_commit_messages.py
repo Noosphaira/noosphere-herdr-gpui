@@ -1,10 +1,6 @@
 """Run: python3 -m unittest discover -s scripts/release/tests -v"""
 import importlib.util
-import os
 from pathlib import Path
-import shutil
-import subprocess
-import tempfile
 import unittest
 
 ROOT = Path(__file__).resolve().parents[3]
@@ -72,49 +68,6 @@ class RuleTests(unittest.TestCase):
         self.assertAccepted(f"feat: add a pinned sidebar section\n\n{CHECK.SCISSORS}\n"
                             "diff --git a/x b/x\n+Added a line.\n")
         self.assertRejected("# everything was a comment\n", "empty")
-
-    def test_this_repository_already_obeys_every_rule(self):
-        first = subprocess.run(["git", "-C", str(ROOT), "rev-list", "--max-parents=0", "HEAD"],
-                               capture_output=True, text=True, check=True).stdout.split()[0]
-        result = subprocess.run(["python3", str(CHECKER), "range", f"{first}..HEAD"],
-                                cwd=ROOT, capture_output=True, text=True, timeout=120)
-        self.assertEqual(result.returncode, 0, result.stderr)
-
-
-class HookTests(unittest.TestCase):
-    """The hook must refuse a commit, not report one after it exists."""
-
-    def setUp(self):
-        self.temp = tempfile.TemporaryDirectory(prefix="herdr-hook-test-")
-        self.addCleanup(self.temp.cleanup)
-        self.work = Path(self.temp.name)
-        subprocess.run(["git", "init", "--quiet", "--initial-branch=main", str(self.work)], check=True)
-        for key, value in (("user.name", "Test"), ("user.email", "test@example.com"),
-                           ("commit.gpgsign", "false"), ("core.hooksPath", ".githooks")):
-            subprocess.run(["git", "-C", str(self.work), "config", key, value], check=True)
-        shutil.copytree(ROOT / ".githooks", self.work / ".githooks")
-        (self.work / "scripts/release").mkdir(parents=True)
-        shutil.copyfile(CHECKER, self.work / "scripts/release/check-commit-messages.py")
-
-    def commit(self, message):
-        return subprocess.run(["git", "-C", str(self.work), "commit", "--allow-empty", "-m", message],
-                              capture_output=True, text=True, timeout=60)
-
-    def subjects(self):
-        log = subprocess.run(["git", "-C", str(self.work), "log", "--format=%s"],
-                             capture_output=True, text=True)
-        return log.stdout.split("\n") if log.returncode == 0 else []
-
-    def test_a_bad_subject_never_becomes_a_commit(self):
-        result = self.commit("Added a pinned sidebar section")
-        self.assertNotEqual(result.returncode, 0)
-        self.assertIn("`type: description`", result.stderr)
-        self.assertEqual(self.subjects(), [])
-
-    def test_a_good_subject_commits_normally(self):
-        result = self.commit("feat: add a pinned sidebar section")
-        self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertIn("feat: add a pinned sidebar section", self.subjects())
 
 
 if __name__ == "__main__":
