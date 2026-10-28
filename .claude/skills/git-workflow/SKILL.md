@@ -25,7 +25,7 @@ Rules referenced here are in AGENTS.md: Branches, Commits, Work cycle, Verificat
      | awk '{ total += $1 + $2 } END { print total + 0 }'
    ```
 
-   Over 1,000: stop and ask the user before continuing.
+   Over 10,000: stop and ask the user before continuing.
 
 ## 3. Check readiness
 

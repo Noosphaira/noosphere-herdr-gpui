@@ -40,7 +40,7 @@
 3. Work with an open decision or blocker is not ready for user review. Present each decision and blocker to the user and wait for the answer.
 4. When the work is ready: commit, run the change locally (Project > Run locally) and present it to the user. Do not push and do not open a pull request.
 5. After the user approves: push the branch, open a pull request to `develop`, and follow the `pr-review-loop` skill until the pull request is merged.
-   Every merge into `develop` is made as the App. A pull request that is ready to merge is not left open: merge it, or tell the user what it waits for. When the user wants to merge a pull request into `develop` with their own account, tell them first that they then cannot approve the next release pull request to `master`: the `master` ruleset requires an approval from someone other than the last pusher.
+   Every merge into `develop` is made as the App. A pull request that is ready to merge is not left open: merge it, or tell the user what it waits for.
 6. After the merge: open or update the pull request from `develop` to `master`. Merging into `master` requires the user's approval on GitHub. Merge into `master` only when the user asks.
 
 The `git-workflow` skill contains the commands for each step.
@@ -51,7 +51,7 @@ The `git-workflow` skill contains the commands for each step.
 - State what could not be built, run or tested.
 
 ### Change size
-- Stop and ask the user before a change exceeds 1,000 added plus deleted lines, excluding lockfiles.
+- Stop and ask the user before a change exceeds 10,000 added plus deleted lines, excluding lockfiles.
 - A pull request to `develop` over this limit fails the `pr-size` check unless it has the `size-exception` label. Add the label only after the user approves the size.
 <!-- END UNIVERSAL -->
 
